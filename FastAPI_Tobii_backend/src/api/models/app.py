@@ -1,9 +1,6 @@
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-
-from src.config import RECORDINGS_PATH, STATIC_FILES_PATH
 
 if TYPE_CHECKING:
     from src.api.services.labeling_service import Labeler

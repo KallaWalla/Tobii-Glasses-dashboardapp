@@ -85,7 +85,10 @@ class CalibrationRecording(Base):
 
     @property
     def tracking_result_paths(self) -> list[Path]:
-        return list(self.tracking_results_path.iterdir())
+            """Return all tracking result paths for this calibration recording, empty if folder missing"""
+            if not self.tracking_results_path.exists():
+                return []
+            return list(self.tracking_results_path.iterdir())
 
 
 class Annotation(Base):

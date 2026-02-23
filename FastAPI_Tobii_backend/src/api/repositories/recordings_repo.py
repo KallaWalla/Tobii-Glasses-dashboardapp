@@ -22,6 +22,7 @@ def get(db: Session, recording_id: str) -> Recording:
 
 
 def get_all(db: Session) -> list[Recording]:
+    print(db.query(Recording).all())
     return db.query(Recording).all()
 
 

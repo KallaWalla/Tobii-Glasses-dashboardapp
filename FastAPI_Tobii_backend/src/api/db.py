@@ -1,13 +1,28 @@
 import os
+from pathlib import Path
 from collections.abc import Generator
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-SQLALCHEMY_DATABASE_URL = f"sqlite:///{os.environ.get('DB_PATH', 'database.db')}"
+BASE_DIR = Path(__file__).resolve().parents[2]
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+DB_FILE = os.environ.get("DB_PATH", str(BASE_DIR / "database.db"))
+
+SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_FILE}"
+
+print("📦 Using database:", SQLALCHEMY_DATABASE_URL)
+
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+)
+
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine,
+)
 
 
 class Base(DeclarativeBase):

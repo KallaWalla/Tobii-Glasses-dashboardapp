@@ -113,12 +113,12 @@ def extract_frames_to_dir(
     for file in frames_path.iterdir():
         file.unlink()
 
-    ffmpeg_path = shutil.which("ffmpeg")
+    ffmpeg_path = shutil.which("ffmpeg.exe")
     if ffmpeg_path is None:
         raise FileNotFoundError("ffmpeg executable not found in PATH")
 
     # Validate ffmpeg_path to ensure it's not tampered or injected
-    if not Path(ffmpeg_path).exists() or Path(ffmpeg_path).name != "ffmpeg":
+    if not Path(ffmpeg_path).exists() or Path(ffmpeg_path).name != "ffmpeg.exe":
         raise ValueError("Invalid ffmpeg executable path")
 
     # Conditionally redirect output based on the print_output argument
