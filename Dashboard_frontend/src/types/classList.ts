@@ -1,8 +1,5 @@
-export type SimroomClass = {
-  id: number
-  class_name: string
-  color: string
-}
+import { SimRoomClass } from "./simrooms"
+
 
 export type Timeline = {
   current_frame_idx: number
@@ -15,7 +12,7 @@ export type Timeline = {
 }
 
 export type PropsClassList = {
-  classes: SimroomClass[]
+  classes: SimRoomClass[]
   timeline: Timeline | null
   setTimeline: React.Dispatch<React.SetStateAction<Timeline | null>>
   onClassChange: () => Promise<void> 

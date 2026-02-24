@@ -38,9 +38,9 @@ export default function SimRoomsComponent({
   const [selectedRecordingId, setSelectedRecordingId] = useState<string>("")
   const [error, setError] = useState<string | null>(null)
 
-  const selectedSimRoom = simrooms.find(
+  const selectedSimRoom = simrooms?.find(
     (s) => s.id === selectedSimRoomId
-  )
+  );
 
   const handleAddSimRoom = async () => {
     if (!newSimRoomName.trim()) return
@@ -116,13 +116,13 @@ export default function SimRoomsComponent({
 
             <ScrollArea className="flex-1 pr-2">
               <div className="space-y-2">
-                {simrooms.length === 0 && (
+                {simrooms?.length === 0 && (
                   <p className="text-sm text-muted-foreground text-center">
                     No sim rooms created
                   </p>
                 )}
 
-                {simrooms.map((room) => (
+                {simrooms?.map((room) => (
                   <div
                     key={room.id}
                     onClick={() => onSelectSimRoom(room.id)}

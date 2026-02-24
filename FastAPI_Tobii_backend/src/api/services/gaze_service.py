@@ -31,6 +31,9 @@ def mask_was_viewed(
         bool: True if part of the mask falls within the circular
               area defined by viewed_radius, False otherwise.
     """
+    if mask.ndim == 3:
+        mask = mask.squeeze(0)
+
     height, width = mask.shape
     device = mask.device
 

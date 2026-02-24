@@ -39,6 +39,17 @@ def get_annotation_by_frame_idx_and_class_id(
     return annotation
 
 
+def get_all_annotations_by_class_id(
+    db: Session,
+    class_id: int,
+) -> list[Annotation]:
+    annotations = (
+        db.query(Annotation)
+        .filter(Annotation.simroom_class_id == class_id)
+        .all()
+    )
+    return annotations
+
 def get_annotations_by_class_id(
     db: Session,
     calibration_id: int,

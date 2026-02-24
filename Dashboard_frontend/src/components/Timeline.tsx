@@ -10,19 +10,21 @@ export function Timeline({ frameIdx, setFrameIdx,timeline, onSeek }: FrameState)
   const [loadingTrack, setLoadingTrack] = useState(false)
   const timelineRef = useRef<HTMLDivElement>(null)
 
+const frameRef = useRef(frameIdx)
 
+useEffect(() => {
+  frameRef.current = frameIdx
+}, [frameIdx])
 
+useEffect(() => {
+  if (!timeline?.is_tracking) return
 
+  const interval = setInterval(() => {
+    onSeek(frameRef.current)
+  }, 1000)
 
-  useEffect(() => {
-    if (!timeline?.is_tracking) return
-
-    const interval = setInterval(() => {
-      onSeek(frameIdx)
-    }, 1000)
-
-    return () => clearInterval(interval)
-  }, [timeline?.is_tracking, frameIdx])
+  return () => clearInterval(interval)
+}, [timeline?.is_tracking])
 
   // 🎬 Seek frame
   const handleSeek = async (newFrame: number) => {

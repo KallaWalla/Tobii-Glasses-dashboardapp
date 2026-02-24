@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from src.api.db import Base, engine
 from src.api.models import App
 from src.api.models.context import GlassesConnectionContext
-from src.api.routes import labeling_route, recordings_route, simrooms_route
+from src.api.routes import labeling_route, recordings_route, simrooms_route,analysis_route
 from src.api.services import glasses_service, recordings_service
 from src.config import Template, templates
 
@@ -42,6 +42,7 @@ app.add_middleware(
 app.include_router(recordings_route.router)
 app.include_router(simrooms_route.router)
 app.include_router(labeling_route.router)
+app.include_router(analysis_route.router)
 
 
 @app.get("/", response_class=HTMLResponse)

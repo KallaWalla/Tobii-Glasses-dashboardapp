@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom"
-import { LayoutDashboard, Hospital } from "lucide-react"
+import { LayoutDashboard, Hospital, Eye } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export default function AppLayout() {
@@ -24,6 +24,13 @@ export default function AppLayout() {
             icon={<Hospital size={18} />}
           >
             Sim Rooms
+          </SidebarItem>
+          
+          <SidebarItem
+            to="/analyse"
+            icon={<Eye size={18} />}
+          >
+            Tracking analysis
           </SidebarItem>
         </nav>
       </aside>

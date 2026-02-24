@@ -3,4 +3,5 @@ export interface Recording {
   participant: string;
   created: string;     
   duration: string;
+  visible_name: string;
 }

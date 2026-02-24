@@ -133,9 +133,9 @@ const handleSeek = async (newFrame: number) => {
 
             {/* Annotations */}
               <AnnotationList
-                annotations={annotations} // use the state variable
-                onSeekFrame={handleSeek} // or any callback that changes frame
-                onAnnotationsUpdate={refreshFrameData} // update state when annotations change
+                annotations={annotations}
+                onSeekFrame={handleSeek} 
+                onAnnotationsUpdate={refreshFrameData} 
               />
 
           </div>

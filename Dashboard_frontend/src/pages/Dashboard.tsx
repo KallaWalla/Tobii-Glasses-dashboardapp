@@ -96,6 +96,7 @@ function Dashboard() {
             <table className="w-full text-sm border">
               <thead className="border-b">
                 <tr>
+                  <th className="text-left p-2">Recording Name</th>
                   <th className="text-left p-2">Participant Name</th>
                   <th className="text-left p-2">Date and Time</th>
                   <th className="text-left p-2">Duration</th>
@@ -105,6 +106,7 @@ function Dashboard() {
               <tbody>
                 {localRecordings.map((rec) => (
                   <tr key={rec.id} className="border-b">
+                    <td className="p-2">{rec.visible_name}</td>
                     <td className="p-2">{rec.participant}</td>
                     <td className="p-2">
                       {new Date(rec.created).toLocaleString()}

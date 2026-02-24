@@ -8,7 +8,7 @@ export const SimroomsAPI = {
   getSimrooms: async (simroomId) => {
     const response = await api.get('/', {
       params: simroomId ? { simroom_id: simroomId } : {},
-    });
+    });    
     return response.data;
   },
 

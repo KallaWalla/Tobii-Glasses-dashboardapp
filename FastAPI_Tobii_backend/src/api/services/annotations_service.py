@@ -49,6 +49,16 @@ def get_annotations_by_class_id(
     return [AnnotationDTO.from_orm(annotation) for annotation in annotations]
 
 
+def get_all_annotations_by_class_id(
+    db: Session, class_id: int
+) -> list[AnnotationDTO]:
+    annotations = annotations_repo.get_all_annotations_by_class_id(
+        db=db,
+        class_id=class_id,
+    )
+
+    return [AnnotationDTO.from_orm(annotation) for annotation in annotations]
+
 def get_annotations_by_frame_idx(
     db: Session, calibration_id: int, frame_idx: int
 ) -> list[AnnotationDTO]:
