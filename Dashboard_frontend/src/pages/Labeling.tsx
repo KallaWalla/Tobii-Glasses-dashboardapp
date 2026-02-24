@@ -1,15 +1,16 @@
-import { useEffect, useState } from "react"
-import {
-LabelingAPI
-} from "../api/labelingApi"
+import { useEffect, useRef, useState } from "react"
+import { LabelingAPI } from "../api/labelingApi"
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Button } from "../components/ui/button"
+import { Timeline } from "../components/Timeline"
+import ClassList from "../components/ClassList"
+import AnnotationList from "../components/AnnotationList"
+
+
 
 export default function Labeler() {
   const [image, setImage] = useState<string | null>(null)
@@ -17,36 +18,61 @@ export default function Labeler() {
   const [classes, setClasses] = useState<any[]>([])
   const [annotations, setAnnotations] = useState<any[]>([])
   const [frameIdx, setFrameIdx] = useState(0)
+  const [loading, setLoading] = useState(true)
 
-  // ✅ initial load
+
   useEffect(() => {
-    loadAll()
+    init()
   }, [])
 
-  const loadAll = async () => {
-    const cls = await LabelingAPI.getClasses()
-    setClasses(cls)
+  const init = async () => {
+    try {
+      setLoading(true)
 
-    const tl = await LabelingAPI.getTimeline()
-    setTimeline(tl)
+      const cls = await LabelingAPI.getClasses()
+      setClasses(cls)
 
-    const ann = await LabelingAPI.getAnnotations()
-    setAnnotations(ann)
-
-    const img = await LabelingAPI.getCurrentFrame()
-    setImage(img)
+      await refreshFrameData()
+    } catch (err) {
+      console.error("Failed to load labeling:", err)
+    } finally {
+      setLoading(false)
+    }
   }
 
+const refreshFrameData = async () => {
+  try {
+    const [img, tl, ann] = await Promise.all([
+      LabelingAPI.getCurrentFrame(),
+      LabelingAPI.getTimeline(),
+      LabelingAPI.getAnnotations(),
+    ])
 
-  // ✅ example frame polling (optional but powerful)
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      const img = await LabelingAPI.getCurrentFrame()
-      setImage(img)
-    }, 1000)
+    setImage(img)
+    setTimeline(tl)
+    setFrameIdx(tl.current_frame_idx)
+    setAnnotations(ann)
+  } catch (e) {
+    console.error("Refresh failed", e)
+  }
+}
 
-    return () => clearInterval(interval)
-  }, [])
+const handleSeek = async (newFrame: number) => {
+  try {
+    await LabelingAPI.getTimeline(newFrame) 
+    await refreshFrameData()
+  } catch (e) {
+    console.error("Seek failed", e)
+  }
+}
+
+  if (loading) {
+    return (
+      <div className="p-6 text-sm text-muted-foreground">
+        Loading labeling session…
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen w-full bg-muted/40 p-4 md:p-6">
@@ -54,99 +80,74 @@ export default function Labeler() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
           {/* LEFT */}
           <div className="lg:col-span-9 space-y-4">
-            {/* Canvas */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Labeling Canvas</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex h-[420px] items-center justify-center rounded-xl border">
-                  {image ? (
-                    <img
-                      src={image}
-                      className="max-h-full rounded-lg"
-                    />
-                  ) : (
-                    "Loading frame..."
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+              <Card className="overflow-hidden">
+                <CardHeader>
+                  <CardTitle>Labeling Canvas</CardTitle>
+                </CardHeader>
+
+                <CardContent>
+                  <div className="relative flex h-[420px] w-full items-center justify-center rounded-xl border bg-muted/20">
+                    {image ? (
+                      <img
+                        src={image}
+                        className="max-h-full max-w-full rounded-lg object-contain cursor-crosshair"
+                        onClick={async (e) => {
+                          if (!timeline?.selected_class_id) return
+
+                          const img = e.currentTarget
+                          const rect = img.getBoundingClientRect()
+
+                          const scaleX = img.naturalWidth / rect.width
+                          const scaleY = img.naturalHeight / rect.height
+
+                          const x = Math.round((e.clientX - rect.left) * scaleX)
+                          const y = Math.round((e.clientY - rect.top) * scaleY)
+
+                        await LabelingAPI.postAnnotation(
+                          [x, y],
+                          timeline.selected_class_id, 
+                          false
+                        )
+
+                        await refreshFrameData()
+                        }}
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground">
+                        <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                        Loading frame...
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
 
             {/* Timeline */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Timeline</CardTitle>
-              </CardHeader>
-              <CardContent>
-              {timeline ? (
-                <div className="space-y-4">
-                  
-                  {/* Frame Slider */}
-                  <input
-                    type="range"
-                    min={0}
-                    max={timeline.frame_count - 1}
-                    value={timeline.current_frame_idx}
-                    className="w-full"
-                    onChange={async (e) => {
-                      const newFrame = Number(e.target.value)
+            <Timeline
+              frameIdx={frameIdx}
+              setFrameIdx={setFrameIdx}
+              timeline={timeline}
+              onSeek={handleSeek}
+            />            
 
-                      const tl = await LabelingAPI.getTimeline(newFrame)
-                      setTimeline(tl)
 
-                      const img = await LabelingAPI.getCurrentFrame()
-                      setImage(img)
-                    }}
-                  />
-
-                  {/* Frame Info */}
-                  <div className="text-sm text-muted-foreground">
-                    Frame {timeline.current_frame_idx} / {timeline.frame_count - 1}
-                  </div>
-
-                </div>
-              ) : (
-                "Loading timeline..."
-              )}
-            </CardContent>
-            </Card>
-            <Button
-              onClick={async () => {
-                const tl = await LabelingAPI.startTracking()
-                setTimeline(tl)
-              }}
-            >
-              Start Tracking
-            </Button>
-      
             {/* Annotations */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Annotations</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ScrollArea className="h-[260px]">
-                  <pre className="text-xs">
-                    {JSON.stringify(annotations, null, 2)}
-                  </pre>
-                </ScrollArea>
-              </CardContent>
-            </Card>
+              <AnnotationList
+                annotations={annotations} // use the state variable
+                onSeekFrame={handleSeek} // or any callback that changes frame
+                onAnnotationsUpdate={refreshFrameData} // update state when annotations change
+              />
+
           </div>
 
           {/* RIGHT */}
-          <div className="lg:col-span-3">
-            <Card>
-              <CardHeader>
-                <CardTitle>Classes</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <pre className="text-xs">
-                  {JSON.stringify(classes, null, 2)}
-                </pre>
-              </CardContent>
-            </Card>
+          <div className="lg:col-span-3 space-y-4">
+            <ClassList
+              classes={classes}
+              timeline={timeline}
+              setTimeline={setTimeline}
+              onClassChange={refreshFrameData}
+            />
           </div>
         </div>
       </div>

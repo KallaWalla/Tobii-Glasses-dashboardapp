@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Response
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -17,22 +17,30 @@ from src.api.services import annotations_service, simrooms_service
 from src.api.services.labeling_service import Labeler
 from ..utils import image_utils
 import base64
+from fastapi import Request
+from pydantic import BaseModel
+from typing import Tuple
 
 router = APIRouter(prefix="/labeling")
 
 
-def require_labeler(request) -> Labeler:
+def require_labeler(request : Request) -> Labeler:
     app = cast(App, request.app)
-    if app.labeler is None:
+    labeler = getattr(app, "labeler", None)
+
+    if labeler is None:
         raise LabelingServiceNotAvailableError()
-    return app.labeler
+
+    return labeler
 
 
 @router.post("/")
-async def start_labeling(calibration_id: int, db: Session = Depends(get_db)):
+async def start_labeling(calibration_id: int, request: Request, db: Session = Depends(get_db)):
     cal_rec = simrooms_service.get_calibration_recording(db=db, calibration_id=calibration_id)
     labeler = Labeler(cal_rec=cal_rec)
     # store labeler in app state
+    request.app.labeler = labeler 
+
     return JSONResponse(content={"message": "Labeling started"})
 
 
@@ -100,9 +108,8 @@ async def get_annotations(db: Session = Depends(get_db), labeler: Labeler = Depe
     return JSONResponse(content=[ann.model_dump() for ann in annotations])
 
 
-@dataclass
-class AnnotationPostBody:
-    point: tuple[int, int]
+class AnnotationPostBody(BaseModel):
+    point: Tuple[int, int]
     label: int
     delete_point: bool = False
 
@@ -160,4 +167,14 @@ async def update_settings(show_inactive_classes: Annotated[bool, Form()], labele
 
 @router.get("/settings")
 async def get_settings(labeler: Labeler = Depends(require_labeler)):
+    print(labeler.show_inactive_classes)
     return JSONResponse(content={"show_inactive_classes": labeler.show_inactive_classes})
+
+@router.post("/class/{class_id}")
+async def select_class(
+    class_id: int,
+    db: Session = Depends(get_db),
+    labeler: Labeler = Depends(require_labeler),
+):
+    labeler.set_selected_class_id(db=db, class_id=class_id)
+    return JSONResponse(content={"selected_class_id": class_id})

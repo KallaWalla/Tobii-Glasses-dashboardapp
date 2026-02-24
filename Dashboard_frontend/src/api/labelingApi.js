@@ -58,7 +58,7 @@ export const LabelingAPI = {
   },
 
   getSettings: async () => {
-    const response = await api.get('/settings');
+    const response = await api.get('/settings');   
     return response.data;
   },
 
@@ -68,4 +68,9 @@ export const LabelingAPI = {
     const response = await api.post('/settings', formData);
     return response.data;
   },
+  selectClass: async (classId) => {
+  const response = await api.post(`/class/${classId}`)
+  return response.data
+},
 };
+

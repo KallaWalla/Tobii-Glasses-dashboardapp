@@ -42,7 +42,6 @@ def recording_is_complete(
 
 
 def clean_recordings(db: Session, recordings_path: Path = RECORDINGS_PATH) -> None:
-    print("Skipping cleaning for test purposes")
     
     recordings = recordings_repo.get_all(db)
 

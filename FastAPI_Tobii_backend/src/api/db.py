@@ -11,7 +11,6 @@ DB_FILE = os.environ.get("DB_PATH", str(BASE_DIR / "database.db"))
 
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_FILE}"
 
-print("📦 Using database:", SQLALCHEMY_DATABASE_URL)
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,

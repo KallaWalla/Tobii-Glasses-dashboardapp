@@ -20,9 +20,14 @@ transformation_chain = T.Compose([
     T.Normalize(mean=IMAGE_PROCESSOR.image_mean, std=IMAGE_PROCESSOR.image_std),
 ])
 
+def load_model(device: str | None = None) -> tuple[torch.nn.Module, BitImageProcessor]:
+    # Detect device if not provided
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
 
-def load_model(device: str = "cuda") -> tuple[torch.nn.Module, BitImageProcessor]:
-    return AutoModel.from_pretrained("facebook/dinov2-base").to(device)  # type: ignore[no-any-return]
+    model = AutoModel.from_pretrained("facebook/dinov2-base").to(device)  # type: ignore[no-any-return]
+    processor = BitImageProcessor.from_pretrained("facebook/dinov2-base")
+    return model, processor
 
 
 def get_embeddings(
@@ -50,8 +55,10 @@ def get_embeddings(
     total_samples = len(samples)
     batch_start_index = 0
     start_time = time.time()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     with torch.no_grad():
+
         for i in range(0, total_samples, batch_size):
             # Process only the current batch
             current_batch_samples = samples[i : i + batch_size]
@@ -59,7 +66,7 @@ def get_embeddings(
             batch_tensor = torch.stack([
                 transformation_chain(sample).squeeze(0)
                 for sample in current_batch_samples
-            ]).cuda()
+            ]).to(device)
 
             # Generate embeddings
             embeddings = dinov2(batch_tensor).last_hidden_state[:, 0]

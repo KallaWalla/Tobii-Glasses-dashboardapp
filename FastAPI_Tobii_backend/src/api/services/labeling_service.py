@@ -72,12 +72,15 @@ class TrackingJob:
 
     def initialize(self) -> None:
         # Load the video predictor and initialize the inference state
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
         self.video_predictor = sam2_service.load_video_predictor(Sam2Checkpoints.LARGE)
         self.inference_state = self.video_predictor.init_state(
             video_path=str(self.frames_path), async_loading_frames=True
         )
-        self.img_std = self.inference_state["images"].img_std.cuda()
-        self.img_mean = self.inference_state["images"].img_mean.cuda()
+        self.img_std = self.inference_state["images"].img_std.to(device)
+        self.img_mean = self.inference_state["images"].img_mean.to(device)
 
         # Remove the results directory if it already exists
         if self.results_path.exists() and self.remove_previous_results:
@@ -105,8 +108,12 @@ class TrackingJob:
 
     def teardown(self) -> None:
         del self.video_predictor
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
+
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
 
     def track_until_loss(
         self, start_frame_idx: int, reverse: bool = False

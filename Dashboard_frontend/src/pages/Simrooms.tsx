@@ -72,11 +72,10 @@ export default function SimRooms() {
     await fetchSimRooms(simRoomId)
   }
 
-  // 🚀 CRITICAL: start labeling flow
-  const onStartLabeling = async (calibrationId: string) => {
-    await LabelingAPI.startLabeling(calibrationId)
-    navigate("/labeling")
-  }
+const onStartLabeling = async (calibrationId: string) => {
+  await LabelingAPI.startLabeling(calibrationId)
+  navigate("/labeling", { replace: true })
+}
 
   return (
     <SimRoomsComponent
