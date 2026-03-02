@@ -1,8 +1,8 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import Request
-from fastapi.responses import HTMLResponse
+from fastapi import HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from src.api.db import Base, engine
@@ -50,12 +50,13 @@ async def root(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(Template.INDEX, {"request": request})
 
 
-@app.get("/glasses/connection", response_class=HTMLResponse)
+@app.get("/glasses/connection", response_class=JSONResponse)
 async def glasses_connection(request: Request) -> HTMLResponse:
     """Retrieve connection details for the glasses"""
-    context = GlassesConnectionContext(
-        request=request,
-        glasses_connected=await glasses_service.is_connected(),
-        battery_level=await glasses_service.get_battery_level(),
-    )
-    return templates.TemplateResponse(Template.CONNECTION_STATUS, context.model_dump())
+    try:
+        connected = await glasses_service.is_connected()
+        battery = await glasses_service.get_battery_level()
+    except TimeoutError:
+        raise HTTPException(status_code=503, detail="Cannot reach Tobii Glasses")
+    
+    return {"glasses_connected": connected, "battery_level": battery}

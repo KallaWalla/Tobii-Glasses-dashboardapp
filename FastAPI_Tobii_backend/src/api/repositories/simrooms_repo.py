@@ -1,5 +1,6 @@
 import shutil
 from pathlib import Path
+from sqlalchemy.orm import joinedload
 
 from sqlalchemy.orm import Session
 from src.api.exceptions import NotFoundError
@@ -14,16 +15,36 @@ from src.config import TRACKING_RESULTS_PATH
 
 
 def get_simroom(db: Session, simroom_id: int) -> SimRoomDTO:
-    """Get a recording by its ID"""
-    simroom = db.query(SimRoom).filter(SimRoom.id == simroom_id).first()
+    simroom = (
+        db.query(SimRoom)
+        .options(
+            joinedload(SimRoom.classes)
+            .joinedload(SimRoomClass.annotations),
+            joinedload(SimRoom.calibration_recordings)
+            .joinedload(CalibrationRecording.recording)
+        )
+        .filter(SimRoom.id == simroom_id)
+        .first()
+    )
+
     if simroom is None:
         raise NotFoundError(f"SimRoom with id {simroom_id} not found")
+
     return SimRoomDTO.from_orm(simroom)
 
 
+
 def get_all_simrooms(db: Session) -> list[SimRoomDTO]:
-    """Get all sim rooms"""
-    simrooms = db.query(SimRoom).all()
+    simrooms = (
+        db.query(SimRoom)
+        .options(
+            joinedload(SimRoom.classes)
+            .joinedload(SimRoomClass.annotations),
+            joinedload(SimRoom.calibration_recordings)
+            .joinedload(CalibrationRecording.recording)
+        )
+        .all()
+    )
     return [SimRoomDTO.from_orm(simroom) for simroom in simrooms]
 
 

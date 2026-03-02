@@ -1,7 +1,0 @@
-export interface Recording {
-  id: string;
-  participant: string;
-  created: string;     
-  duration: string;
-  visible_name: string;
-}

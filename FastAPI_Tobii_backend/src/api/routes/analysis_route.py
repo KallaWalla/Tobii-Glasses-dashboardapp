@@ -27,7 +27,7 @@ from src.api.services.labeling_service import TrackingJob
 
 router = APIRouter(prefix="/analyse")
 
-@router.post("/")
+@router.post("/", response_model=AnalysisResponse)
 async def run_analysis(
     body: AnalysisRequest,
     db: Session = Depends(get_db),
