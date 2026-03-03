@@ -10,9 +10,8 @@ import { Timeline } from "../components/Timeline"
 import ClassList from "../components/ClassList"
 import AnnotationList from "../components/AnnotationList"
 import { useLocation, useNavigate } from "react-router-dom"
-import { SimroomsAPI } from "../api/simroomsApi"
-import { SimRoom } from "../types/simrooms"
 import { Button } from "../components/ui/button"
+import { useParams } from "react-router-dom";
 
 
 
@@ -24,28 +23,14 @@ export default function Labeler() {
   const [annotations, setAnnotations] = useState<any[]>([])
   const [frameIdx, setFrameIdx] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [selectedSimRoom, setSelectedSimRoom] = useState<SimRoom | null>(null)
   const navigate = useNavigate()
-
+  const { calibrationId } = useParams<{ calibrationId: string }>();
+  const calibrationIdNum = Number(calibrationId);
 
 
   useEffect(() => {
     init()
-    const fetchSimRoom = async () => {
-      if (!location.state?.simRoomId) return
-
-      try {
-        const simroomsData = await SimroomsAPI.getSimrooms(location.state.simRoomId)
-        // get the first (and only) sim room returned
-        const sm = simroomsData.simrooms[0]
-        setSelectedSimRoom(sm)
-      } catch (err) {
-        console.error("Failed to fetch sim room:", err)
-      }
-    }
-
-    fetchSimRoom()
-  }, [location.state])
+  }, [])
 
   const init = async () => {
     try {
@@ -172,25 +157,32 @@ const handleSeek = async (newFrame: number) => {
                 setTimeline={setTimeline}
                 onClassChange={refreshFrameData}
               />
-              <Card className="shadow-xl border-0 rounded-2xl overflow-hidden">
-                <CardHeader className="bg-gray-400 text-white">
-                  <CardTitle>
-                    Hoe deze pagina werkt
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-4 text-sm text-gray-600">
-                  <p>
-                    Dit is de Calibratie pagina, hier kan je voorwerpen calibreren zodat ze herkenbaar worden voor de AI:  
+              {/* DELETE ALL ANNOTATIONS BUTTON */}
+              <div className="flex justify-start mb-4">
+                <Button
+                  size="lg"
+                  className="bg-red-600 hover:bg-red-700 text-white"
+                  onClick={async () => {
+                    
+                    if (!calibrationIdNum)
+                       return
+                       
+                    if (!confirm("Weet je zeker dat je alle annotaties wilt verwijderen?"))
+                       return
+                       
+                    
 
-                    <ol className="pt-2 list-decimal pl-5 space-y-2">
-                      <li>Selecteer een <strong>voorwerp</strong>, als het een zwarte rand heeft is het geselecteerd</li>
-                      <li>Op het canvas click je dan op het <strong>voorwerp</strong>, hierdoor zal er een gekleurde rand op het canvas komen <strong>Belangrijk: zorg dat alleen jouw voorwep in de gekleurde kader is</strong></li>
-                      <li>Door op de <strong>tijdslijn</strong> te clicken verander je van Frame waar je dan opnieuw jouw voorwerp kan selecteren, dit blijf je herhalen tot je enkele references hebt </li>
-                      <li>Als je op <strong>Start Tracking</strong> clickt zal de AI alle references zoeken in de opname van het geselecteerd voorwerp</li>
-                    </ol>
-                  </p>
-                </CardContent>
-              </Card>
+                    try {
+                      await LabelingAPI.deleteAllAnnotations(calibrationIdNum)
+                      await refreshFrameData()
+                    } catch (err) {
+                      console.error("Failed to delete annotations", err)
+                    }
+                  }}
+                >
+                  Verwijder alle annotaties
+                </Button>
+              </div>
               <div className="flex justify-start mb-4">
                 <Button
                   size="lg"

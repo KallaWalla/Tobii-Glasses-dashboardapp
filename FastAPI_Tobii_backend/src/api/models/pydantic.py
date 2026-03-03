@@ -8,20 +8,9 @@ from pydantic import BaseModel, computed_field
 
 from src.api.models.db import (
     Annotation as DBAnnotation,
-)
-from src.api.models.db import (
     CalibrationRecording as DBCalibrationRecording,
-)
-from src.api.models.db import (
     PointLabel as DBPointLabel,
-)
-from src.api.models.db import (
     Recording as DBRecording,
-)
-from src.api.models.db import (
-    SimRoom as DBSimRoom,
-)
-from src.api.models.db import (
     SimRoomClass as DBSimRoomClass,
 )
 
@@ -30,6 +19,10 @@ class BaseDTO(BaseModel):
     class Config:
         from_attributes = True
 
+
+# ============================================================
+# Recording
+# ============================================================
 
 class RecordingDTO(BaseDTO):
     id: str
@@ -54,7 +47,9 @@ class RecordingDTO(BaseDTO):
 
     @classmethod
     async def parse_participant(cls, recording: GlassesRecording) -> str:
-        participant_bytes = base64.b64decode(await recording.meta_lookup("participant"))
+        participant_bytes = base64.b64decode(
+            await recording.meta_lookup("participant")
+        )
         participant_json = participant_bytes.decode("utf-8")
         parsed_data = json.loads(participant_json)
         return parsed_data["name"] or "N/A"
@@ -84,6 +79,10 @@ class RecordingDTO(BaseDTO):
         )
 
 
+# ============================================================
+# PointLabel
+# ============================================================
+
 class PointLabelDTO(BaseDTO):
     id: int
     annotation_id: int
@@ -102,16 +101,38 @@ class PointLabelDTO(BaseDTO):
         )
 
 
+# ============================================================
+# SimRoomClass (nu standalone class)
+# ============================================================
+
+class SimRoomClassDTO(BaseDTO):
+    id: int
+    class_name: str
+    color: str
+
+    @classmethod
+    def from_orm(cls, simroom_class: DBSimRoomClass) -> "SimRoomClassDTO":
+        return cls(
+            id=simroom_class.id,
+            class_name=simroom_class.class_name,
+            color=simroom_class.color,
+        )
+
+
+# ============================================================
+# Annotation
+# ============================================================
+
 class AnnotationDTO(BaseDTO):
     id: int
     calibration_id: int
     simroom_class_id: int
     frame_idx: int
-    simroom_class: "SimRoomClassDTO"
+    simroom_class: SimRoomClassDTO
     point_labels: list[PointLabelDTO]
-    mask_base64: str
-    frame_crop_base64: str
-    box: tuple[int, int, int, int]
+    mask_base64: str | None
+    frame_crop_base64: str | None
+    box: tuple[int, int, int, int] | None
 
     @classmethod
     def from_orm(cls, annotation: DBAnnotation) -> "AnnotationDTO":
@@ -120,20 +141,27 @@ class AnnotationDTO(BaseDTO):
             calibration_id=annotation.calibration_id,
             simroom_class_id=annotation.simroom_class_id,
             frame_idx=annotation.frame_idx,
-            simroom_class=SimRoomClassDTO.from_orm(annotation.simroom_class),
+            simroom_class=SimRoomClassDTO.from_orm(
+                annotation.simroom_class
+            ),
             point_labels=[
                 PointLabelDTO.from_orm(point_label)
                 for point_label in annotation.point_labels
             ],
             mask_base64=annotation.mask_base64,
             frame_crop_base64=annotation.frame_crop_base64,
-            box=tuple(json.loads(annotation.box_json)),
+            box=tuple(json.loads(annotation.box_json))
+            if annotation.box_json
+            else None,
         )
 
 
+# ============================================================
+# CalibrationRecording
+# ============================================================
+
 class CalibrationRecordingDTO(BaseDTO):
     id: int
-    simroom_id: int
     recording_id: str
     recording: RecordingDTO
     annotations: list[AnnotationDTO]
@@ -147,9 +175,10 @@ class CalibrationRecordingDTO(BaseDTO):
     ) -> "CalibrationRecordingDTO":
         return cls(
             id=calibration_recording.id,
-            simroom_id=calibration_recording.simroom_id,
             recording_id=calibration_recording.recording_id,
-            recording=RecordingDTO.from_orm(calibration_recording.recording),
+            recording=RecordingDTO.from_orm(
+                calibration_recording.recording
+            ),
             annotations=[
                 AnnotationDTO.from_orm(annotation)
                 for annotation in calibration_recording.annotations
@@ -157,39 +186,4 @@ class CalibrationRecordingDTO(BaseDTO):
             video_path=calibration_recording.video_path,
             tracking_results_path=calibration_recording.tracking_results_path,
             tracking_result_paths=calibration_recording.tracking_result_paths,
-        )
-
-
-class SimRoomClassDTO(BaseDTO):
-    id: int
-    simroom_id: int
-    class_name: str
-    color: str
-
-    @classmethod
-    def from_orm(cls, simroom_class: DBSimRoomClass) -> "SimRoomClassDTO":
-        return cls(
-            id=simroom_class.id,
-            simroom_id=simroom_class.simroom_id,
-            class_name=simroom_class.class_name,
-            color=simroom_class.color,
-        )
-
-
-class SimRoomDTO(BaseDTO):
-    id: int
-    name: str
-    calibration_recordings: list[CalibrationRecordingDTO]
-    classes: list[SimRoomClassDTO]
-
-    @classmethod
-    def from_orm(cls, simroom: DBSimRoom) -> "SimRoomDTO":
-        return cls(
-            id=simroom.id,
-            name=simroom.name,
-            calibration_recordings=[
-                CalibrationRecordingDTO.from_orm(cr)
-                for cr in simroom.calibration_recordings
-            ],
-            classes=[SimRoomClassDTO.from_orm(sc) for sc in simroom.classes],
         )

@@ -1,31 +1,55 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Button } from "./ui/button";
 import { ScrollArea } from "./ui/scroll-area";
 import { Card } from "./ui/card";
-import { SimRoom, SimRoomClass, Annotation } from "../types/simrooms";
+import { SimRoom, SimRoomClass, Annotation, CalibrationRecording } from "../types/simrooms";
+import { LabelingAPI } from "../api/labelingApi";
+import { Trash2 } from "lucide-react";
 
 type Props = {
-  simRoom: SimRoom;
+  calibrationRec: CalibrationRecording[];
   simClass: SimRoomClass;
   onBack: () => void;
 };
 
-export default function AnnotationViewer({ simRoom, simClass, onBack }: Props) {
-  const annotations: Annotation[] =
-    simRoom.calibration_recordings?.flatMap((cal) =>
-      cal.annotations?.filter((ann) => ann.simroom_class_id === simClass.id) || []
-    ) || [];
+export default function AnnotationViewer({ calibrationRec,simClass, onBack }: Props) {
+  const initialAnnotations: Annotation[] = useMemo(() => {
+    return (
+      calibrationRec?.flatMap((cal) =>
+        cal.annotations?.filter(
+          (ann) => ann.simroom_class_id === simClass.id
+        ) || []
+      ) || []
+    );
+  }, [simClass, calibrationRec]);
 
   const [selectedFrame, setSelectedFrame] = useState<number | null>(null);
+  const [annotations, setAnnotations] = useState<Annotation[]>(initialAnnotations)
+  
+  useEffect(() => {
+  setAnnotations(initialAnnotations);
+}, [initialAnnotations]);
 
   const handleClickThumbnail = (frameIndex: number) => {
     setSelectedFrame(frameIndex);
   };
 
-  const handleDeleteAnnotation = (annId: number) => {
-    if (confirm("Weet je zeker dat je deze annotatie wilt verwijderen?")) {
-      // je kan hier een delete API call toevoegen als nodig
-      console.log("Delete annotation", annId);
+  const handleDeleteAnnotation = async (annId: number) => {
+    const confirmed = window.confirm(
+      "Weet je zeker dat je deze annotatie wilt verwijderen?"
+    );
+
+    if (!confirmed) return;
+
+    setAnnotations((prev) => prev.filter((a) => a.id !== annId));
+
+    try {
+      await LabelingAPI.deleteAnnotation(annId);
+    } catch (err) {
+      console.error("Failed to delete annotation", err);
+
+      const updated = await LabelingAPI.getAnnotations();
+      setAnnotations(updated);
     }
   };
 
@@ -70,7 +94,8 @@ export default function AnnotationViewer({ simRoom, simClass, onBack }: Props) {
                     className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity h-7 w-7"
                     onClick={() => handleDeleteAnnotation(ann.id)}
                 >
-                    🗑
+                  <Trash2 className="h-4 w-4" />
+
                 </Button>
                 </Card>
             ))}

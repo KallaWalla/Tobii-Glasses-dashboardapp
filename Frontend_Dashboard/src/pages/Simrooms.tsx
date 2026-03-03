@@ -1,100 +1,98 @@
 import React, { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { SimRoom } from "../types/simrooms"
+import { CalibrationRecording, SimRoom, SimRoomClass } from "../types/simrooms"
 import { Recording } from "../types/recording"
 import SimRoomsComponent from "../components/SimroomsComponent"
-import { SimroomsAPI } from "../api/simroomsApi"
 import { RecordingsAPI } from "../api/recordingsApi"
 import { LabelingAPI } from "../api/labelingApi"
+import { CalibrationAPI } from "../api/calibrationsApi"
+import { ClassesAPI } from "../api/classesApi"
 
 export default function SimRooms() {
   const navigate = useNavigate()
   const [loadingLabeling, setLoadingLabeling] = useState(false)
-  const [simrooms, setSimRooms] = useState<SimRoom[]>([])
   const [recordings, setRecordings] = useState<Recording[]>([])
-  const [selectedSimRoomId, setSelectedSimRoomId] =
-    useState<string | undefined>()
+  const [classes, setClasses] = useState<SimRoomClass[]>([])
+  const [calibrationRec, setCalibrationRec] = useState<CalibrationRecording[]>([])
 
-  // ✅ LOAD DATA
-  const fetchSimRooms = async (selectedId?: string) => {
-    const data = await SimroomsAPI.getSimrooms(selectedId)
-    setSimRooms(data.simrooms)
-
-    if (selectedId) {
-      setSelectedSimRoomId(selectedId)
-    }
-  }
 
 
   const fetchRecordings = async () => {
     const data = await RecordingsAPI.getLocal()
     setRecordings(data)
   }
+  const fetchClasses = async () => {
+    const data = await ClassesAPI.getClasses()
+    setClasses(data)
+  }
+  const fetchCalibrationRec = async () => {
+    const data = await CalibrationAPI.getCalibrationRecordings()
+    setCalibrationRec(data)
+  }
+
 
   useEffect(() => {
-    fetchSimRooms()
+    fetchCalibrationRec()
     fetchRecordings()
+    fetchClasses()
   }, [])
 
-  // ✅ HANDLERS (NOW BACKEND-DRIVEN)
-
-  const onAddSimRoom = async (name: string) => {
-    await SimroomsAPI.addSimroom(name)
-    await fetchSimRooms()
+  const onAddClass= async (
+    newClassName: string
+  ) => {
+  await ClassesAPI.addClass(newClassName.trim())
+  await fetchClasses()
+  }
+  const onDeleteClass = async (
+    classId: number
+  ) => {
+  await ClassesAPI.deleteClass(classId)
+  await fetchClasses()
   }
 
-  const onDeleteSimRoom = async (id: string) => {
-    await SimroomsAPI.deleteSimroom(id)
-    await fetchSimRooms()
-  }
-
-  const onSelectSimRoom = async (id: string) => {
-    await fetchSimRooms(id)
-  }
 
 
   const onAddCalibrationRecording = async (
-    simRoomId: string,
     recordingId: string
   ) => {
-    await SimroomsAPI.addCalibrationRecording(simRoomId, recordingId)
-    await fetchSimRooms(simRoomId)
-  }
+    await CalibrationAPI.addCalibrationRecording(recordingId)
+    await fetchCalibrationRec()
 
+  }
+  const handleAnnotationsChanged = async () => {
+    await fetchCalibrationRec(); 
+  };
   const onDeleteCalibrationRecording = async (
-    simRoomId: string,
     calibrationId: string
   ) => {
-    await SimroomsAPI.deleteCalibrationRecording(
-      simRoomId,
-      calibrationId
-    )
-    await fetchSimRooms(simRoomId)
+    await CalibrationAPI.deleteCalibrationRecording(calibrationId)
+    await fetchCalibrationRec()
+
   }
 
-  const onStartLabeling = async (calibrationId: string, simRoomId: string) => {
+  const onStartLabeling = async (calibrationId: string) => {
     try {
-      setLoadingLabeling(true) // START loader
+      setLoadingLabeling(true) 
       await LabelingAPI.startLabeling(calibrationId)
-      navigate("/labeling", { replace: true, state: { simRoomId } })
+      navigate(`/labeling/${calibrationId}`, { replace: true,})
     } catch (err) {
       console.error("Failed to start labeling:", err)
     } finally {
-      setLoadingLabeling(false) // OPTioneel: in praktijk navigate verandert scherm, dus vaak niet nodig
+      setLoadingLabeling(false) 
     }
   }
 
   return (
     <SimRoomsComponent
-      simrooms={simrooms}
+      calibrationRec={calibrationRec}
+      classes={classes}
       recordings={recordings}
-      selectedSimRoomId={selectedSimRoomId}
-      onAddSimRoom={onAddSimRoom}
-      onDeleteSimRoom={onDeleteSimRoom}
-      onSelectSimRoom={onSelectSimRoom}
+      onAddClass={onAddClass}
+      onDeleteClass={onDeleteClass}
       onAddCalibrationRecording={onAddCalibrationRecording}
       onDeleteCalibrationRecording={onDeleteCalibrationRecording}
       onStartLabeling={onStartLabeling}
+      handleAnnotationsChanged={handleAnnotationsChanged}
     />
   )
 }

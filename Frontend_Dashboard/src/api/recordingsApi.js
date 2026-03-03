@@ -13,6 +13,7 @@ export const RecordingsAPI = {
   getLocal: async () => {
     const response = await api.get('/local');
     return response.data;
+    
   },
 
   deleteLocal: async (recordingId) => {
@@ -28,6 +29,14 @@ export const RecordingsAPI = {
   downloadRecording: async (recordingId) => {
     const response = await api.get(`/glasses/${recordingId}/download`);
     return response.data;
+  },
+  getLocalById: async (recordingId) => {
+  const response = await api.get(`/local/${recordingId}`)
+  return response.data
+},
+
+  getLocalVideoUrl: (recordingId) => {
+    return `http://localhost:8000/recordings/local/${recordingId}/video`
   },
 };
 

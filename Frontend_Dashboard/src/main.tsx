@@ -7,6 +7,7 @@ import Labeler from "./pages/Labeling.js"
 import Layout from "./components/Layout.js"
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom"
 import EyeTracking from "./pages/EyeTracking.js"
+import RecordingDetail from "./pages/Recording.js"
 
 const router = createBrowserRouter([
   {
@@ -25,12 +26,16 @@ const router = createBrowserRouter([
         element: <SimRooms />,
       },
       {
-        path: "/labeling",
+        path: "/labeling/:calibrationId",
         element: <Labeler />,
       },
       {
         path: "/analyse",
         element: <EyeTracking />,
+      },
+      {
+        path: "/recordings/:id",
+        element: <RecordingDetail  />,
       },
     ],
   },

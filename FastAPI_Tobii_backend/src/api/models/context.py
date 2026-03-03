@@ -7,7 +7,7 @@ from src.api.models.pydantic import (
     AnnotationDTO,
     RecordingDTO,
     SimRoomClassDTO,
-    SimRoomDTO,
+    CalibrationRecordingDTO,
 )
 from src.config import Template
 
@@ -22,10 +22,18 @@ class BaseContext(BaseModel):
         return base
 
 
+# ============================================================
+# Glasses
+# ============================================================
+
 class GlassesConnectionContext(BaseContext):
     glasses_connected: bool
     battery_level: float
 
+
+# ============================================================
+# Recordings
+# ============================================================
 
 class RecordingsContext(BaseContext):
     recordings: list[RecordingDTO] = Field(default_factory=list)
@@ -34,19 +42,32 @@ class RecordingsContext(BaseContext):
     content: str = Template.RECORDINGS
 
 
-class SimRoomsContext(BaseContext):
-    recordings: list[RecordingDTO] = Field(default_factory=list)
-    simrooms: list[SimRoomDTO] = Field(default_factory=list)
-    selected_simroom: SimRoomDTO | None = None
-    content: str = Template.SIMROOMS
+# ============================================================
+# Calibration Recordings (vervangt SimRooms)
+# ============================================================
 
+class CalibrationRecordingsContext(BaseContext):
+    recordings: list[RecordingDTO] = Field(default_factory=list)
+    calibration_recordings: list[CalibrationRecordingDTO] = Field(default_factory=list)
+    selected_calibration: CalibrationRecordingDTO | None = None
+    content: str = Template.SIMROOMS  # hergebruik template indien gewenst
+
+
+# ============================================================
+# Classes
+# ============================================================
 
 class ClassListContext(BaseContext):
-    selected_simroom: SimRoomDTO
+    calibration_id: int
+    classes: list[SimRoomClassDTO]
 
+
+# ============================================================
+# Labeling
+# ============================================================
 
 class LabelingContext(BaseContext):
-    simroom_id: int
+    calibration_id: int
     recording_id: str
     show_inactive_classes: bool
     content: str = Template.LABELER
@@ -69,7 +90,7 @@ class LabelingTimelineContext(BaseContext):
 
 class LabelingClassesContext(BaseContext):
     selected_class_id: int
-    simroom_id: int
+    calibration_id: int
     classes: list[SimRoomClassDTO]
 
 

@@ -42,19 +42,21 @@ export interface SimRoom {
 
 
 export interface SimRoomsPageProps {
-  simrooms: SimRoom[]
+  calibrationRec: CalibrationRecording[]
+  classes: SimRoomClass[]
   recordings: Recording[]
-  selectedSimRoomId?: string
-  onAddSimRoom: (name: string) => Promise<void>
-  onDeleteSimRoom: (id: string) => Promise<void>
-  onSelectSimRoom: (id: string) => void
+  onAddClass: (
+    newClassName: string
+  ) => Promise<void>
+  onDeleteClass: (
+    classId: number
+  ) => Promise<void>
   onAddCalibrationRecording: (
-    simRoomId: string,
     recordingId: string
   ) => Promise<void>
   onDeleteCalibrationRecording: (
-    simRoomId: string,
     calibrationId: string
   ) => Promise<void>
-  onStartLabeling: (calibrationId: string, simRoomId: string) => void
+  onStartLabeling: (calibrationId: string) => void
+  handleAnnotationsChanged: () => void
 }

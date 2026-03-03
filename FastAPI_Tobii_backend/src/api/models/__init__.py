@@ -7,18 +7,17 @@ from .context import (
     LabelingSettingsContext,
     LabelingTimelineContext,
     RecordingsContext,
-    SimRoomsContext,
+    CalibrationRecordingsContext,
 )
 
 __all__ = [
     "App",
     "BaseContext",
-    "Labeler",
     "LabelingAnnotationsContext",
     "LabelingClassesContext",
     "LabelingContext",
     "LabelingSettingsContext",
     "LabelingTimelineContext",
     "RecordingsContext",
-    "SimRoomsContext",
+    "CalibrationRecordingsContext",
 ]

@@ -4,7 +4,6 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from "./ui/card"
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
@@ -20,24 +19,35 @@ import { ScrollArea } from "./ui/scroll-area"
 import { Plus, Trash2, Pencil, Loader2 } from "lucide-react"
 import { cn } from "../lib/utils"
 import { SimRoomsPageProps } from "../types/simrooms"
-import { SimroomsAPI } from "../api/simroomsApi"
 import AnnotationViewer from "./AnnotationViewer"
-
+import {
+  HoverCard,
+  HoverCardTrigger,
+  HoverCardContent,
+} from "@/components/ui/hover-card"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination"
+import { Separator } from "@/components/ui/separator"
 
 export default function SimRoomsComponent({
-  simrooms,
+  calibrationRec,
+  classes,
   recordings,
-  selectedSimRoomId,
-  onAddSimRoom,
-  onDeleteSimRoom,
-  onSelectSimRoom,
+  onAddClass,
+  onDeleteClass,
   onAddCalibrationRecording,
   onDeleteCalibrationRecording,
   onStartLabeling,
+  handleAnnotationsChanged,
 }: SimRoomsPageProps) {
-  const [searchClassName, setSearchClassName] = useState("") // 🔹 voor zoeken
+  const [searchClassName, setSearchClassName] = useState("") 
   const [newClassName, setNewClassName] = useState("")
-  const [newSimRoomName, setNewSimRoomName] = useState("")
   const [selectedRecordingId, setSelectedRecordingId] = useState<string>("")
   const [error, setError] = useState<string | null>(null)
   const [loadingLabeling, setLoadingLabeling] = useState<string | null>(null)
@@ -45,29 +55,56 @@ export default function SimRoomsComponent({
   classId: number;
   className: string;
 } | null>(null)
+  const ITEMS_PER_PAGE = 6;
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const RECORDINGS_PER_PAGE = 7;
+
+  const [currentCalibrationPage, setCurrentCalibrationPage] = useState(1);
+  const [showRecordingSelect, setShowRecordingSelect] = useState(false)
+  const [selectOpen, setSelectOpen] = useState(false)
   
-  const selectedSimRoom = simrooms?.find(
-    (s) => s.id === selectedSimRoomId
+  const filteredAndSortedClasses = classes
+  ?.map((cls) => {
+    const annotationCount =
+      calibrationRec?.reduce((total, cal) => {
+        const countForThisCal =
+          cal.annotations?.filter(
+            (ann) => ann.simroom_class_id === cls.id
+          ).length ?? 0;
+        return total + countForThisCal;
+      }, 0) ?? 0;
+
+    return {
+      ...cls,
+      annotationCount,
+    };
+  })
+  .filter((cls) =>
+    cls.class_name.toLowerCase().includes(searchClassName.toLowerCase())
+  )
+  .sort((a, b) => a.annotationCount - b.annotationCount); 
+
+  const totalPages = Math.ceil(filteredAndSortedClasses.length / ITEMS_PER_PAGE);
+
+  const paginatedClasses = filteredAndSortedClasses.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
   );
 
+  const totalCalibrationPages = Math.ceil(
+    calibrationRec.length / RECORDINGS_PER_PAGE
+  );
 
+  const paginatedCalibrationRec = calibrationRec.slice(
+    (currentCalibrationPage - 1) * RECORDINGS_PER_PAGE,
+    currentCalibrationPage * RECORDINGS_PER_PAGE
+  );
 
-  const handleAddSimRoom = async () => {
-    if (!newSimRoomName.trim()) return
-    try {
-      await onAddSimRoom(newSimRoomName.trim())
-      setNewSimRoomName("")
-      setError(null)
-    } catch (err: any) {
-      setError(err.message || "Failed to create Sim Room")
-    }
-  }
-  
   const handleAddCalibration = async () => {
-    if (!selectedSimRoom || !selectedRecordingId) return
+    if (!selectedRecordingId) return
     try {
       await onAddCalibrationRecording(
-        selectedSimRoom.id,
         String(selectedRecordingId)
       )
       setSelectedRecordingId("")
@@ -76,357 +113,373 @@ export default function SimRoomsComponent({
       setError(err.message || "Failed to add calibration recording")
     }
   }
-  if (viewingClass && selectedSimRoom) {
-    const simClass = selectedSimRoom.classes.find(c => c.id === viewingClass.classId);
+  if (viewingClass) {
+    const simClass = classes.find(c => c.id === viewingClass.classId);
     if (!simClass) return null;
 
     return (
       <AnnotationViewer
-        simRoom={selectedSimRoom}
+        calibrationRec={calibrationRec}
         simClass={simClass}
-        onBack={() => setViewingClass(null)}
+        onBack={async () => {
+          await handleAnnotationsChanged(); 
+          setViewingClass(null);            
+        }}
       />
     );
   }
 
   return (
-    <div className="bg-[#F4F9FC] p-10 space-y-12">
+    <div className="bg-[#F4F9FC] p-10 space-y-12 min-h-screen">
       <div>
-        <h1 className="text-4xl font-bold text-[#4CA2D5] tracking-tight">
-          Simulatiekamers Dashboard
+        <h1 className="text-4xl font-bold text-[#16B0A5] tracking-tight">
+          Voorwerpen calibreren
         </h1>
       </div>
-        {/* Instructions */}
-      <Card className="shadow-xl border-0 rounded-2xl overflow-hidden">
-        <CardHeader>
-          <CardTitle>Hoe ga je te werk</CardTitle>
-          <CardDescription>
-            Op deze pagina kan je een calibratie opname maken met specifieke voorwerpen door onderstaande stappen de volgen.
-            Een calibratie opname word gemaakt om voorwerpen tijdens de analyse te kunnen herkennen. Door references te maken van het voorwerp. hoe diverser het aantal references naar het voorwerp hoe beter de analyse zal werken. 
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm text-muted-foreground">
-          <ol className="list-decimal pl-5 space-y-2">
-            <li>Maak een <strong>Simulatie kamer</strong> aan of kies een bestaande</li>
-            <li>Voeg <strong>voorwerpen</strong> toe die moeten worden herkend</li>
-            <li>kies een opname om de voorwerpen te <strong>Calibreren</strong></li>
-          </ol>
-          <p className="italic">
-            Opmerking 1: voorwerpen kunnen toegevoegd worden tijdens het calibreren.
-          </p>
-          <p className="italic">
-            hint: kies voor een opname waar het voorwerp in voorkomt.
-          </p>
-        </CardContent>
-      </Card>
-
       {error && (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
-          {/* SIM ROOMS */}
-        <Card className="shadow-xl border-0 rounded-2xl overflow-hidden xl:col-span-4">
-          <CardHeader className="bg-[#4CA2D5] text-white">
-            <CardTitle>Simulatie kamers</CardTitle>
-          </CardHeader>
-
-          <CardContent className="p-6 space-y-4">
-            <div className="flex gap-2">
-              <Input
-                placeholder="New sim room name"
-                value={newSimRoomName}
-                onChange={(e) => setNewSimRoomName(e.target.value)}
-              />
-              <Button size="icon" onClick={handleAddSimRoom}>
-                <Plus className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <ScrollArea className="max-h-[350px] overflow-auto">
-                {simrooms?.length === 0 && (
-                  <p className="text-center text-sm text-[#4CA2D5]/80">
-                    Nog geen Simulatie kamers gemaakt
-                  </p>
-                )}
-              <div className="space-y-2">
-
-                {simrooms?.map((room) => (
-                  <div
-                    key={room.id}
-                    onClick={() => onSelectSimRoom(room.id)}
-                    className={cn(
-                      "flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 cursor-pointer hover:bg-[#F4F9FC] transition",
-                      selectedSimRoomId === room.id &&
-                        "bg-[#D9EFFF] border-[#4CA2D5]"
-                    )}
-                  >
-                    <span className="font-medium text-sm">
-                      {room.name}
-                    </span>
-
-                    <Button
-                      size="icon"
-                      variant="destructive"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        if (
-                          confirm(
-                            "Ben je zeker dat je de simulatie kamer wilt verwijderen en alle voorwerpen en calibartie opnames?"
-                          )
-                        ) {
-                          onDeleteSimRoom(room.id)
-                        }
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
-
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-stretch">
         {/* CLASSES / SIMULATIE VOORWERPEN */}
-        <Card className="shadow-xl border-0 rounded-2xl overflow-hidden xl:col-span-4">
+        <Card className="shadow-xl border-0 rounded-2xl overflow-hidden xl:col-span-6 flex flex-col">
           <CardHeader className="bg-[#16B0A5] text-white">
             <CardTitle>Simulatie voorwerpen</CardTitle>
           </CardHeader>
 
-          <CardContent className="p-6 space-y-4">
-            {!selectedSimRoom && (
-              <p className="text-center text-sm text-[#16B0A5]/80">
-                Kies eerst een simulatiekamer
+          <CardContent className="p-6 space-y-4 flex flex-col flex-1 overflow-hidden">
+
+            {/* ADD NEW CLASS AT TOP */}
+            <div className="space-y-1">
+              <Input
+                placeholder="Naam nieuw voorwerp"
+                value={newClassName}
+                onChange={(e) => setNewClassName(e.target.value)}
+                onKeyDown={async (e) => {
+                  if (e.key === "Enter" && newClassName.trim()) {
+                    await onAddClass(newClassName);
+                    setNewClassName("");
+                  }
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Druk op <strong>Enter</strong> om toe te voegen.
               </p>
-            )}
+            </div>
+            <Separator className="h-[2px]"/>
 
-            {selectedSimRoom && (
-              <>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Beheer de voorwerpen voor{" "}
-                  <span className="font-medium text-foreground">
-                    {selectedSimRoom.name}
-                  </span>.
-                </p>
-                <Input
-                  placeholder="Zoek voorwerp..."
-                  value={searchClassName}
-                  onChange={(e) => setSearchClassName(e.target.value)}
-                  className="mb-2"
-                />
+            {/* SEARCH */}
+            <Input
+              placeholder="Zoek voorwerp..."
+              value={searchClassName}
+              onChange={(e) => {
+                setSearchClassName(e.target.value);
+                setCurrentPage(1); // reset page when searching
+              }}
+            />
 
-                {/* LIST OF CLASSES / VOORWERPEN */}
-                <ScrollArea className="max-h-[300px] overflow-auto">
-                  <div className="space-y-2">
-                    {selectedSimRoom.classes
-                      ?.filter((cls) =>
-                        cls.class_name.toLowerCase().includes(searchClassName.toLowerCase()) // 🔹 filter op searchClassName
-                      )
-                      .map((cls) => {
-                        const annotationCount =
-                          selectedSimRoom.calibration_recordings?.reduce((total, cal) => {
-                            const countForThisCal =
-                              cal.annotations?.filter(
-                                (ann) => ann.simroom_class_id === cls.id
-                              ).length ?? 0
-                            return total + countForThisCal
-                          }, 0) ?? 0
+            {/* LIST */}
+              <div className="space-y-2">
 
-                        return (
-                          <div
-                            key={cls.id}
-                            className={cn(
-                              "flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 cursor-pointer hover:bg-[#F4F9FC] transition")}
+                {paginatedClasses.map((cls) => {
+                  const isNotCalibrated = cls.annotationCount < 5;
 
-                              onClick={() =>
-                              setViewingClass({ classId: cls.id, className: cls.class_name })
-                            }
-                          >
-                            <div>
-                              <span className="font-medium">{cls.class_name}</span>
-                              <p className="text-xs text-gray-500">References: {annotationCount}</p>
-                            </div>
+                  return (
+                    <div
+                      key={cls.id}
+                      onClick={() =>
+                        setViewingClass({ classId: cls.id, className: cls.class_name })
+                      }
+                      className={cn(
+                        "flex items-center justify-between rounded-xl border px-4 py-3 cursor-pointer transition",
+                        isNotCalibrated
+                          ? "bg-red-50 border-red-300 hover:bg-red-100"
+                          : "bg-white border-slate-200 hover:bg-[#F4F9FC]"
+                      )}
+                    >
+                      <div>
+                        <span
+                          className={cn(
+                            "font-medium",
+                            isNotCalibrated && "text-red-600"
+                          )}
+                        >
+                          {cls.class_name}
+                        </span>
+                        <p
+                          className={cn(
+                            "text-xs",
+                            isNotCalibrated ? "text-red-500" : "text-gray-500"
+                          )}
+                        >
+                          References: {cls.annotationCount}
+                        </p>
+                      </div>
 
-                            <Button
-                              size="icon"
-                              variant="destructive"
-                              onClick={async (e) => {
-                                e.stopPropagation()
-                                if (
-                                  confirm(
-                                    `Ben je zeker dat je "${cls.class_name}" wilt verwijderen? Alle annotaties van dit voorwerp worden ook verwijderd.`
-                                  )
-                                ) {
-                                  await SimroomsAPI.deleteSimroomClass(
-                                    selectedSimRoom.id,
-                                    cls.id
-                                  )
-                                  await onSelectSimRoom(selectedSimRoom.id)
-                                }
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        )
-                      })}
-                  </div>
-                </ScrollArea>
+                      <Button
+                        size="icon"
+                        variant="destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (
+                            confirm(
+                              `Ben je zeker dat je "${cls.class_name}" wilt verwijderen?`
+                            )
+                          ) {
+                            onDeleteClass(cls.id);
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
 
-                {/* ADD NEW CLASS / VOORWERP */}
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">
-                    Typ de naam van een nieuw voorwerp en druk op <strong>Enter</strong> om toe te voegen.
-                  </p>
-                    <Input
-                      placeholder="Naam nieuw voorwerp"
-                      value={newClassName}
-                      onChange={(e) => setNewClassName(e.target.value)}
-                      onKeyDown={async (e) => {
-                        if (e.key === "Enter" && selectedSimRoom && newClassName.trim()) {
-                          await SimroomsAPI.addSimroomClass(
-                            selectedSimRoom.id,
-                            newClassName.trim()
-                          )
+            {/* PAGINATION */}
+            {totalPages > 1 && (
+              <div className="flex justify-center pt-4">
+                <Pagination>
+                  <PaginationContent>
 
-                          await onSelectSimRoom(selectedSimRoom.id)
-
-                          setNewClassName("") // ✅ dit leegt het veld correct
+                    <PaginationItem>
+                      <PaginationPrevious
+                        onClick={() =>
+                          setCurrentPage((p) => Math.max(p - 1, 1))
                         }
-                      }}
-                    />
-                </div>
-              </>
+                      />
+                    </PaginationItem>
+
+                    {Array.from({ length: totalPages }).map((_, index) => (
+                      <PaginationItem key={index}>
+                        <PaginationLink
+                          isActive={currentPage === index + 1}
+                          onClick={() => setCurrentPage(index + 1)}
+                        >
+                          {index + 1}
+                        </PaginationLink>
+                      </PaginationItem>
+                    ))}
+
+                    <PaginationItem>
+                      <PaginationNext
+                        onClick={() =>
+                          setCurrentPage((p) =>
+                            Math.min(p + 1, totalPages)
+                          )
+                        }
+                      />
+                    </PaginationItem>
+
+                  </PaginationContent>
+                </Pagination>
+              </div>
             )}
+
           </CardContent>
         </Card>
 
 
         {/* CALIBRATION RECORDINGS */}
-        <Card className="shadow-xl border-0 rounded-2xl overflow-hidden xl:col-span-4">
+        <Card className="shadow-xl border-0 rounded-2xl overflow-hidden xl:col-span-6 flex flex-col">
           <CardHeader className="bg-[#F4A261] text-white">
             <CardTitle>Calibratie opnames</CardTitle>
           </CardHeader>
 
-          <CardContent className="p-6 space-y-4">
-            {!selectedSimRoom && (
-              <p className="text-center text-sm text-[#F4A261]/80">
-                Kies eerst een simulatiekamer
-              </p>
-            )}
-            {selectedSimRoom && (
-              <div className="flex gap-2 mb-2">
-                <Select
-                  value={selectedRecordingId}
-                  onValueChange={setSelectedRecordingId}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="kies een opname" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {recordings.map((rec) => (
-                      <SelectItem
-                        key={rec.id}
-                        value={rec.id.toString()}
-                      >
-                        {rec.participant} - {new Date(rec.created).toLocaleString("nl-BE", {
+          <CardContent className="p-6 space-y-4 flex flex-col flex-1 overflow-hidden">
+              <div className="mb-2">
+                {!showRecordingSelect ? (
+                  <Button
+                    onClick={() => setShowRecordingSelect(true)}
+                    className="w-full"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Opname toevoegen
+                  </Button>
+                ) : (
+                  <Select
+                    onValueChange={async (value) => {
+                      try {
+                        await onAddCalibrationRecording(value)
+                        setShowRecordingSelect(false)
+                      } catch (err: any) {
+                        setError(err.message || "Failed to add calibration recording")
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Kies een opname" />
+                    </SelectTrigger>
+
+                    <SelectContent>
+                      {recordings.map((rec) => (
+                        <SelectItem
+                          key={rec.id}
+                          value={rec.id.toString()}
+                        >
+                          {rec.participant} -{" "}
+                          {new Date(rec.created).toLocaleString("nl-BE", {
                             year: "numeric",
                             month: "2-digit",
                             day: "2-digit",
                             hour: "2-digit",
                             minute: "2-digit",
                           })}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Button size="icon" onClick={handleAddCalibration}>
-                  <Plus className="h-4 w-4" />
-                </Button>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
-            )}
 
-            <ScrollArea className="max-h-[350px] overflow-auto">
-              {selectedSimRoom &&
-                selectedSimRoom.calibration_recordings.length === 0 && (
+              {calibrationRec &&
+                calibrationRec.length === 0 && (
                     <p className="text-center text-sm text-[#F4A261]/80">
                     Nog geen calibartie opnames toegevoegd
                   </p>
                 )}
 
               <div className="space-y-2">
-                {selectedSimRoom?.calibration_recordings.map(
-                  (cal) => (
-                    <div
-                      key={cal.id}
-                            className={cn(
-                              "flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 hover:bg-[#F4F9FC] transition")}
-                    >
-                      <div>
-                        <p className="font-medium">
-                          {cal.recording.participant}
-                        </p>
-                          <p className="text-xs text-gray-500">
-                            {new Date(cal.recording.created).toLocaleString("nl-BE", {
-                            year: "numeric",
-                            month: "2-digit",
-                            day: "2-digit",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </p>
-                      </div>
-
-                      <div className="flex gap-2">
-                        <Button
-                          size="icon"
-                          className="cursor-pointer"
-                          disabled={loadingLabeling !== null} // disable alle knoppen tijdens loader
-                          onClick={async () => {
-                            try {
-                              setLoadingLabeling(cal.id)
-                              await onStartLabeling(cal.id, selectedSimRoom.id)
-                            } finally {
-                              setLoadingLabeling(null)
-                            }
-                          }}
-                        >
-                          {loadingLabeling === cal.id ? (
-                            <Loader2 className="animate-spin h-4 w-4" />
-                          ) : (
-                            <Pencil className="h-4 w-4 cursor-pointer" />
-                          )}
-                        </Button>
-
-                        <Button
-                          size="icon"
-                          className="cursor-pointer"
-                          variant="destructive"
-                          onClick={() => {
-                            if (
-                              confirm(
-                                "Deze calibratie opname"
-                              )
-                            ) {
-                              onDeleteCalibrationRecording(
-                                selectedSimRoom.id,
-                                cal.id
-                              )
-                            }
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
+                {paginatedCalibrationRec.map((cal) => {
+                   const uniqueClassIds = Array.from(
+                  new Set(
+                    cal.annotations?.map((ann) => ann.simroom_class_id) ?? []
                   )
-                )}
+                )
+
+                const uniqueClasses = uniqueClassIds
+                  .map((id) => classes.find((cls) => cls.id === id))
+                  .filter(Boolean)
+
+                  return (
+                    <HoverCard key={cal.id} openDelay={200}>
+                      <HoverCardTrigger asChild>
+                        <div
+                          className={cn(
+                            "flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 hover:bg-[#F4F9FC] transition cursor-pointer"
+                          )}
+                        >
+                          <div>
+                            <p className="font-medium">
+                              {cal.recording.participant}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {new Date(cal.recording.created).toLocaleString("nl-BE", {
+                                year: "numeric",
+                                month: "2-digit",
+                                day: "2-digit",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </p>
+                          </div>
+
+                          <div className="flex gap-2">
+                            <Button
+                              className="cursor-pointer"
+                              disabled={loadingLabeling !== null}
+                              onClick={async (e) => {
+                                e.stopPropagation()
+                                try {
+                                  setLoadingLabeling(cal.id)
+                                  await onStartLabeling(cal.id)
+                                } finally {
+                                  setLoadingLabeling(null)
+                                }
+                              }}
+                            >
+                              {loadingLabeling === cal.id ? (
+                                <Loader2 className="animate-spin h-4 w-4" />
+                              ) : (
+                                 "Start Labeling"
+                              )}
+                            </Button>
+
+                            <Button
+                              size="icon"
+                              variant="destructive"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                if (confirm("Deze calibratie opname verwijderen?")) {
+                                  onDeleteCalibrationRecording(cal.id)
+                                }
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </HoverCardTrigger>
+
+                      <HoverCardContent className="w-64">
+                        <div className="space-y-2">
+                          <p className="text-sm font-semibold">
+                            Geannoteerde voorwerpen
+                          </p>
+
+                          {uniqueClasses.length > 0 ? (
+                            <div className="flex flex-wrap gap-2">
+                              {uniqueClasses.map((cls) => (
+                                <span
+                                  key={cls!.id}
+                                  className="text-xs px-2 py-1 rounded-full bg-[#F4A261]/20 text-[#F4A261] font-medium"
+                                >
+                                  {cls!.class_name}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">
+                              Geen annotaties
+                            </p>
+                          )}
+                        </div>
+                      </HoverCardContent>
+                    </HoverCard>
+                  )
+                })}
               </div>
-            </ScrollArea>
+            {totalCalibrationPages > 1 && (
+              <div className="flex justify-center pt-4">
+                <Pagination>
+                  <PaginationContent>
+
+                    <PaginationItem>
+                      <PaginationPrevious
+                        onClick={() =>
+                          setCurrentCalibrationPage((p) => Math.max(p - 1, 1))
+                        }
+                      />
+                    </PaginationItem>
+
+                    {Array.from({ length: totalCalibrationPages }).map((_, index) => (
+                      <PaginationItem key={index}>
+                        <PaginationLink
+                          isActive={currentCalibrationPage === index + 1}
+                          onClick={() => setCurrentCalibrationPage(index + 1)}
+                        >
+                          {index + 1}
+                        </PaginationLink>
+                      </PaginationItem>
+                    ))}
+
+                    <PaginationItem>
+                      <PaginationNext
+                        onClick={() =>
+                          setCurrentCalibrationPage((p) =>
+                            Math.min(p + 1, totalCalibrationPages)
+                          )
+                        }
+                      />
+                    </PaginationItem>
+
+                  </PaginationContent>
+                </Pagination>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

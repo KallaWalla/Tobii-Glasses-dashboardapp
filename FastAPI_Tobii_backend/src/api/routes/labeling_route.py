@@ -3,6 +3,9 @@ from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
+from src.api.models.pydantic import SimRoomClassDTO
+from src.api.repositories import classes_repo
+from src.api.services import classes_service
 from sqlalchemy.orm import Session
 
 from src.api.db import get_db
@@ -13,7 +16,7 @@ from src.api.exceptions import (
 )
 from src.api.models import App
 from src.api.repositories import annotations_repo
-from src.api.services import annotations_service, simrooms_service
+from src.api.services import annotations_service
 from src.api.services.labeling_service import Labeler
 from ..utils import image_utils
 import base64
@@ -36,7 +39,7 @@ def require_labeler(request : Request) -> Labeler:
 
 @router.post("/")
 async def start_labeling(calibration_id: int, request: Request, db: Session = Depends(get_db)):
-    cal_rec = simrooms_service.get_calibration_recording(db=db, calibration_id=calibration_id)
+    cal_rec = classes_service.get_calibration_recording(db=db, calibration_id=calibration_id)
     labeler = Labeler(cal_rec=cal_rec)
     # store labeler in app state
     request.app.labeler = labeler 
@@ -81,7 +84,7 @@ async def get_timeline(
     }
 
     if labeler.has_selected_class:
-        simroom_class = simrooms_service.get_simroom_class(db=db, class_id=selected_class_id)
+        simroom_class = classes_repo.get_class(db=db, class_id=selected_class_id)
         timeline["tracks"] = annotations_repo.get_tracks(labeler.current_class_results_path)
         timeline["selected_class_color"] = simroom_class.color
 
@@ -95,9 +98,16 @@ async def get_timeline(
 
 @router.get("/classes")
 async def get_classes(db: Session = Depends(get_db), labeler: Labeler = Depends(require_labeler)):
-    classes = simrooms_service.get_simroom_classes(db=db, simroom_id=labeler.simroom_id)
+    classes = classes_repo.get_all_classes(db=db)
+    
+    # Set selected class if available
     labeler.set_selected_class_id(db, classes[0].id if classes else None)
-    return JSONResponse(content=[cls.model_dump() for cls in classes])
+    
+    # Convert to Pydantic DTOs
+    classes_dto = [SimRoomClassDTO.from_orm(cls) for cls in classes]
+    
+    # Use model_dump() to serialize
+    return JSONResponse(content=[cls.model_dump() for cls in classes_dto])
 
 
 @router.get("/annotations")
@@ -144,6 +154,21 @@ async def delete_annotation(annotation_id: int, db: Session = Depends(get_db), l
         db=db, calibration_id=labeler.calibration_id, class_id=labeler.selected_class_id
     )
     return JSONResponse(content=[ann.model_dump() for ann in annotations])
+
+@router.delete("/annotations/calibration/{calibration_id}")
+async def delete_all_annotations(calibration_id: int, db: Session = Depends(get_db)):
+    classes = classes_repo.get_classes_by_calibration(db, calibration_id)
+
+    annotations = []
+
+    for sim_class in classes:
+        anns = annotations_repo.get_all_annotations_by_class_id(db, sim_class.id)
+        annotations.extend(anns)
+    print(annotations)
+    for ann in annotations:
+        annotations_repo.delete_annotation(db, ann.id)
+    
+    return JSONResponse(content=[])
 
 
 @router.post("/tracking")

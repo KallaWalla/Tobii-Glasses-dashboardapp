@@ -10,7 +10,16 @@ export const AnalysisAPI = {
       recording_id: recordingId,
       class_ids: classIds,
     });
+    return response.data; 
+  },
 
-    return response.data;
+  getProgress: async (jobId) => {
+    const response = await api.get(`/progress/${jobId}`);    
+    return response.data; 
+  },
+
+  getResult: async (jobId) => {
+    const response = await api.get(`/result/${jobId}`);
+    return response.data; 
   },
 };

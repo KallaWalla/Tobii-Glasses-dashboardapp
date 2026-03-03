@@ -25,6 +25,7 @@ export const LabelingAPI = {
     const response = await api.get('/timeline', {
       params: { frame_idx: frameIdx },
     });
+    
     return response.data;
   },
 
@@ -49,6 +50,10 @@ export const LabelingAPI = {
 
   deleteAnnotation: async (annotationId) => {
     const response = await api.delete(`/annotations/${annotationId}`);
+    return response.data;
+  },
+  deleteAllAnnotations: async (calibrationId) => {
+    const response = await api.delete(`/annotations/calibration/${calibrationId}`);    
     return response.data;
   },
 

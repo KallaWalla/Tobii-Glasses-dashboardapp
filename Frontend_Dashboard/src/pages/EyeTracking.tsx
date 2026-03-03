@@ -13,40 +13,54 @@ import { Loader2 } from "lucide-react"
 
 import { AnalysisAPI, AnalysisResponse } from "@/api/analysisApi"
 import { RecordingsAPI } from "@/api/recordingsApi"
-import { SimroomsAPI } from "@/api/simroomsApi"
-import { SimRoomClass } from "../types/simrooms"
+import { CalibrationRecording, SimRoomClass } from "../types/simrooms"
 import { ClassAnalysisResult, ViewSegment } from "../types/Analysis"
 import { Recording } from "../types/recording"
-import { cn } from "../lib/utils"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { ClassesAPI } from "../api/classesApi"
+import { ClassSelectionDialog } from "../components/VoorwerpSelectionDialog"
+import { CalibrationAPI } from "../api/calibrationsApi"
 
 export default function EyeTracking() {
   const [classes, setClasses] = useState<SimRoomClass[]>([])
   const [recordings, setRecordings] = useState<Recording[]>([])
+  const [calibrationRecordings, setCalibrationRecordings] = useState<CalibrationRecording[]>([])
   const [selectedClasses, setSelectedClasses] = useState<number[]>([])
   const [selectedRecording, setSelectedRecording] = useState<string | null>(null)
   const [result, setResult] = useState<AnalysisResponse | null>(null)
   const [loading, setLoading] = useState(false)
-  const [simrooms, setSimrooms] = useState<any[]>([])
-  const [selectedSimroom, setSelectedSimroom] = useState<number | null>(null)
+  const [progress, setProgress] = useState(0);
+  const [eta, setEta] = useState(0);
 
+
+  function formatSeconds(sec: number | null) {
+    if (sec === null) return "--:--";
+    const minutes = Math.floor(sec / 60);
+    const seconds = Math.floor(sec % 60);
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+  }
+// Inside polling loop:
   useEffect(() => {
     const load = async () => {
       const rec = await RecordingsAPI.getLocal()
       setRecordings(rec)
       if (rec.length > 0) setSelectedRecording(rec[0].id)
 
-      const rooms = await SimroomsAPI.getSimrooms()
-      setSimrooms(rooms.simrooms)
+      const classes = await ClassesAPI.getClasses()
+      const calibrationRecordings = await CalibrationAPI.getCalibrationRecordings()
+      setClasses(classes)
+      setCalibrationRecordings(calibrationRecordings)
     }
     load()
   }, [])
 
-  const handleSimroomChange = async (simroomId: number) => {
-    setSelectedSimroom(simroomId)
-    setSelectedClasses([])
-    const data = await SimroomsAPI.getSimroomClasses(simroomId)
-    setClasses(data.classes)
-  }
+
 
   const toggleClass = (id: number) => {
     setSelectedClasses(prev =>
@@ -55,120 +69,136 @@ export default function EyeTracking() {
   }
 
   const runAnalysis = async () => {
-    if (!selectedRecording || selectedClasses.length === 0) return
-    setLoading(true)
-    setResult(null)
-    try {
-      const data = await AnalysisAPI.runAnalysis(selectedRecording, selectedClasses)
-      setResult(data)
-    } finally {
-      setLoading(false)
-    }
-  }
+    if (!selectedRecording || selectedClasses.length === 0) return;
 
-  return (
-    <div className="bg-[#F4F9FC] p-10 space-y-12">
+    setLoading(true);
+    setResult(null);
+
+    try {
+      // 1. Start analysis and get job_id
+      const { job_id } = await AnalysisAPI.runAnalysis(
+        selectedRecording,
+        selectedClasses
+      );
+
+      // 2. Poll progress until finished
+      let progress = 0;
+      while (progress < 1) {
+        await new Promise((res) => setTimeout(res, 1000)); // 1s delay
+        const data = await AnalysisAPI.getProgress(job_id);
+        progress = data.progress;
+        setProgress(progress);
+        setEta(data.eta_seconds);
+      }
+
+      // 3. Fetch final result
+      const finalResult = await AnalysisAPI.getResult(job_id);
+      setResult(finalResult);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+return (
+  <div className="min-h-screen bg-[#F4F9FC] py-16 px-6">
+    <div className="max-w-6xl mx-auto space-y-14">
+
+      {/* HEADER */}
       <div>
         <h1 className="text-4xl font-bold text-[#4CA2D5] tracking-tight">
-          Eye Tracking Analyse
+          Stap 2
         </h1>
-        <p className="text-muted-foreground mt-2">
-          Analyseer kijkgedrag van een deelnemer op geselecteerde objecten binnen een simulatiekamer.
+        <p className="text-muted-foreground mt-3 text-lg">
+          Kies de opname en de voorwerpen die u wilt analyseren.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
+      {/* SELECTION SECTION */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
 
         {/* RECORDING */}
-        <Card className="shadow-xl border-0 rounded-2xl overflow-hidden xl:col-span-4">
+        <Card className="shadow-xl border-0 rounded-2xl overflow-hidden h-full">
           <CardHeader className="bg-[#4CA2D5] text-white">
-            <CardTitle>1. Selecteer opname</CardTitle>
-            <CardDescription className="text-white/80">
-              Kies de opname van de deelnemer die je wil analyseren.
-              Dit is de sessie waarvan het kijkgedrag zal worden onderzocht.
-            </CardDescription>
+            <CardTitle >
+              1. Selecteer opname
+            </CardTitle>
           </CardHeader>
-          <CardContent className="p-6">
-            <select
-              className="w-full rounded-lg border p-3 bg-white"
-              value={selectedRecording ?? ""}
-              onChange={(e) => setSelectedRecording(e.target.value)}
-            >
-              {recordings.map(rec => (
-                <option key={rec.id} value={rec.id}>
-                  {rec.participant ?? rec.id}
-                </option>
-              ))}
-            </select>
-          </CardContent>
-        </Card>
 
-        {/* SIMROOM */}
-        <Card className="shadow-xl border-0 rounded-2xl overflow-hidden xl:col-span-4">
-          <CardHeader className="bg-[#16B0A5] text-white">
-            <CardTitle>2. Selecteer simulatiekamer</CardTitle>
-            <CardDescription className="text-white/80">
-              Kies de simulatiekamer waarin de objecten zijn gedefinieerd.
-              Enkel objecten uit deze kamer kunnen geanalyseerd worden.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-6">
-            <select
-              className="w-full rounded-lg border p-3 bg-white"
-              value={selectedSimroom ?? ""}
-              onChange={(e) => handleSimroomChange(Number(e.target.value))}
+          <CardContent className="space-y-4 py-4">
+            <Select
+              value={selectedRecording ?? ""}
+              onValueChange={(value: any) => setSelectedRecording(value)}
             >
-              <option value="">Kies een simulatiekamer</option>
-              {simrooms.map((room) => (
-                <option key={room.id} value={room.id}>
-                  {room.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="w-full rounded-lg">
+                <SelectValue placeholder="Select recording" />
+              </SelectTrigger>
+
+              <SelectContent>
+              {recordings
+                .filter(
+                  (rec) =>
+                    !calibrationRecordings.some((cal) => cal.recording.id === rec.id)
+                )
+                .map((rec) => (
+                  <SelectItem key={rec.id} value={rec.id}>
+                    {rec.participant ?? rec.id} –{" "}
+                    {rec.duration.split(".")[0].slice(2)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </CardContent>
         </Card>
 
         {/* CLASSES */}
-        <Card className="shadow-xl border-0 rounded-2xl overflow-hidden xl:col-span-4">
+        <Card className="shadow-xl border-0 rounded-2xl overflow-hidden h-full">
           <CardHeader className="bg-[#F4A261] text-white">
-            <CardTitle>3. Selecteer objecten</CardTitle>
-            <CardDescription className="text-white/80">
-              Vink de objecten aan waarvoor je wil weten hoe lang en wanneer
-              de deelnemer ernaar heeft gekeken.
-            </CardDescription>
+            <CardTitle>
+              2. Selecteer voorwerpen
+            </CardTitle>
           </CardHeader>
-          <CardContent className="p-6 space-y-4">
-            {!selectedSimroom && (
-              <p className="text-sm text-[#F4A261]/80 text-center">
-                Kies eerst een simulatiekamer
-              </p>
-            )}
 
-            {selectedSimroom && (
-              <ScrollArea className="max-h-[250px] pr-4">
-                <div className="space-y-3">
-                  {classes.map(cls => (
-                    <div key={cls.id} className="flex items-center gap-3">
-                      <Checkbox
-                        checked={selectedClasses.includes(cls.id)}
-                        onCheckedChange={() => toggleClass(cls.id)}
-                      />
-                      <span className="text-sm">{cls.class_name}</span>
+          <CardContent className="space-y-4 py-4">
+            {/* SELECTED CLASSES PREVIEW */}
+            {selectedClasses.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {selectedClasses.map((id) => {
+                  const cls = classes.find(c => c.id === id)
+                  if (!cls) return null
+
+                  return (
+                    <div
+                      key={id}
+                      className="flex items-center gap-2 bg-[#F4A261]/10 text-[#F4A261] px-3 py-1.5 rounded-full text-sm font-medium"
+                    >
+                      {cls.class_name}
+
+                      <button
+                        onClick={() => toggleClass(id)}
+                        className="text-xs hover:text-red-500 transition"
+                      >
+                        ✕
+                      </button>
                     </div>
-                  ))}
-                </div>
-              </ScrollArea>
+                  )
+                })}
+              </div>
             )}
+            <ClassSelectionDialog
+              classes={classes}
+              selectedClasses={selectedClasses}
+              toggleClass={toggleClass}
+            />
 
             <Button
               onClick={runAnalysis}
-              className="w-full mt-4 bg-[#4CA2D5] hover:bg-[#3B8CBF] text-white rounded-xl"
-              disabled={loading || !selectedSimroom || selectedClasses.length === 0}
+              className="w-full bg-[#4CA2D5] hover:bg-[#3B8CBF] text-white rounded-xl py-6 text-base"
+              disabled={loading || selectedClasses.length === 0}
             >
               {loading ? (
                 <>
                   <Loader2 className="animate-spin mr-2 h-4 w-4" />
-                  Analyse wordt uitgevoerd...
+                  Analyse wordt uitgevoerd... ({(progress*100).toFixed(0)}%, ETA {formatSeconds(eta)})
                 </>
               ) : (
                 "Start Analyse"
@@ -177,46 +207,61 @@ export default function EyeTracking() {
           </CardContent>
         </Card>
       </div>
-
+      {loading && (
+        <div className="w-full bg-gray-200 rounded-full h-3 mt-4">
+          <div
+            className="bg-[#4CA2D5] h-3 rounded-full transition-all"
+            style={{ width: `${progress * 100}%` }}
+          />
+        </div>
+      )}
       {/* RESULTS */}
       {result && (
-        <Card className="shadow-xl border-0 rounded-2xl overflow-hidden">
-          <CardHeader>
-            <CardTitle>Analyse Resultaten</CardTitle>
+        <Card className="shadow-xl border-0 rounded-2xl overflow-hidden h-full">
+          <CardHeader className="bg-[#16B0A5] text-white">
+            <CardTitle>
+              Analyse Resultaten
+            </CardTitle>
             <CardDescription>
               Overzicht van totale kijktijd en specifieke kijkmomenten per geselecteerd object.
             </CardDescription>
           </CardHeader>
 
-          <CardContent className="p-6 space-y-6">
-            {result.classes.map((cls: ClassAnalysisResult) => (
-              <div
-                key={cls.class_id}
-                className="rounded-2xl border bg-white p-6 shadow-sm"
-              >
-                <h3 className="font-semibold text-lg text-[#4CA2D5]">
-                  {cls.class_name}
-                </h3>
+          <CardContent className="space-y-8">
 
-                <p className="mt-2 text-sm">
-                  Totale kijktijd:{" "}
-                  <span className="font-bold text-base">
-                    {cls.total_view_time_seconds.toFixed(2)} seconden
-                  </span>
-                </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+              {result.classes.map((cls: ClassAnalysisResult) => (
+                <div
+                  key={cls.class_id}
+                  className="rounded-2xl border bg-[#FAFDFF] p-6 shadow-sm hover:shadow-md transition"
+                >
+                  <h3 className="font-semibold text-lg text-[#4CA2D5]">
+                    {cls.class_name}
+                  </h3>
 
-                <div className="mt-4 text-sm text-muted-foreground space-y-1">
-                  {cls.view_segments.map((seg: ViewSegment, i: number) => (
-                    <div key={i}>
-                      Frames {seg.start_frame} → {seg.end_frame}
-                    </div>
-                  ))}
+                  <p className="mt-3 text-sm">
+                    Totale kijktijd:
+                    <span className="block text-xl font-bold mt-1">
+                      {cls.total_view_time_seconds.toFixed(2)} s
+                    </span>
+                  </p>
+
+                  <div className="mt-4 text-sm text-muted-foreground space-y-1 max-h-32 overflow-y-auto pr-2">
+                    {cls.view_segments.map((seg: ViewSegment, i: number) => {
+                      const startSec = (seg.start_frame / result.fps).toFixed(2);
+                      const endSec = (seg.end_frame / result.fps).toFixed(2);
+                      return <div key={i}>Tijd {startSec}s → {endSec}s</div>;
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
+
           </CardContent>
         </Card>
       )}
+
     </div>
-  )
+  </div>
+)
 }

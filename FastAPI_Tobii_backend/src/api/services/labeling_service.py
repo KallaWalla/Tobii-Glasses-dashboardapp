@@ -12,9 +12,10 @@ from torchvision.ops import masks_to_boxes
 
 from src.aliases import UInt8Array
 from src.api.models.pydantic import AnnotationDTO, CalibrationRecordingDTO
-from src.api.repositories import simrooms_repo
+from src.api.repositories import classes_repo
 from src.api.services import annotations_service, sam2_service
 from ..utils import image_utils
+import time
 
 from src.config import (
     TRACKING_RESULTS_PATH,
@@ -26,6 +27,7 @@ from src.utils import extract_frames_to_dir, get_frame_from_dir
 class TrackingJob:
     GRACE_PERIOD: int = 25  # Number of frames to wait before considering a tracking loss
     progress: float = 0.0
+    eta_seconds: float | None = None
 
     def __init__(
         self,
@@ -44,6 +46,7 @@ class TrackingJob:
         self.remove_previous_results = remove_previous_results
 
     def run(self) -> int:
+        start_time = time.perf_counter()
         self.initialize()
 
         total_frames_tracked = 0
@@ -61,6 +64,12 @@ class TrackingJob:
             # Track forwards until tracking loss:
             for frame_idx in self.track_until_loss(start_frame_idx):
                 self.progress = frame_idx / self.frame_count
+
+                elapsed = time.perf_counter() - start_time
+
+                if self.progress > 0:
+                    total_estimated = elapsed / self.progress
+                    self.eta_seconds = max(total_estimated - elapsed, 0)
                 total_frames_tracked += 1
 
                 if frame_idx in annotations_frame_idx:
@@ -122,7 +131,7 @@ class TrackingJob:
         with torch.amp.autocast("cuda"):  # type: ignore[attr-defined]
             for (
                 out_frame_idx,
-                _,
+                obj_ids,
                 out_mask_logits,
             ) in self.video_predictor.propagate_in_video(
                 inference_state=self.inference_state,
@@ -131,30 +140,39 @@ class TrackingJob:
             ):
                 yield out_frame_idx
 
-                mask_torch = out_mask_logits[0] > 0.5
-                if mask_torch.any():
-                    tracking_loss = 0
+                for obj_id, mask_logits in zip(obj_ids, out_mask_logits):
 
-                    # calculate bounding box and final mask
+                    mask_torch = mask_logits > 0.5
+
+                    if not mask_torch.any():
+                        continue
+
                     x1, y1, x2, y2 = (
                         masks_to_boxes(mask_torch)[0].cpu().numpy().astype(np.int32)
                     )
+
                     mask = mask_torch.cpu().numpy().astype(np.uint8)
 
                     x1, x2 = min(x1, x2), max(x1, x2)
                     y1, y2 = min(y1, y2), max(y1, y2)
+
                     final_mask = mask[:, y1:y2, x1:x2]
 
                     frame: UInt8Array = self.inference_state["images"].last_loaded_image
                     frame_roi = frame[y1:y2, x1:x2, :]
 
-                    file_path = self.results_path / f"{out_frame_idx}.npz"
+                    # 🔥 SAVE PER CLASS
+                    class_folder = self.results_path / str(obj_id)
+                    class_folder.mkdir(exist_ok=True)
+
+                    file_path = class_folder / f"{out_frame_idx}.npz"
+
                     np.savez_compressed(
                         file_path,
                         mask=final_mask,
                         box=np.array([x1, y1, x2, y2]).astype(np.int32),
                         roi=frame_roi,
-                        class_id=self.class_id,
+                        class_id=obj_id,
                         frame_idx=out_frame_idx,
                     )
                 else:
@@ -252,6 +270,11 @@ class Labeler:
             self._tracking_job is not None
             and self._tracking_job.class_id == self._selected_class_id
         )
+    @property
+    def tracking_eta(self) -> float | None:
+        if self._tracking_job is None:
+            return None
+        return self._tracking_job.eta_seconds
 
     @property
     def is_tracking(self) -> bool:
@@ -269,7 +292,7 @@ class Labeler:
         if class_id is None:
             self._selected_class_id = -1
         else:
-            simrooms_repo.get_simroom_class(  # check if class exists
+            classes_repo.get_class(  # check if class exists
                 db=db, class_id=class_id
             )
             self._selected_class_id = class_id
@@ -290,7 +313,7 @@ class Labeler:
 
         # Get all tracked classes and filter out the
         # ones which have an annotation in the current frame
-        tracked_classes = simrooms_repo.get_tracked_classes(
+        tracked_classes = classes_repo.get_tracked_classes(
             db=db,
             calibration_id=self.calibration_id,
         )
