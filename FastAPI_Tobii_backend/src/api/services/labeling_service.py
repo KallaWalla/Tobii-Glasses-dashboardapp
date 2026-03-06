@@ -124,60 +124,61 @@ class TrackingJob:
     ) -> Generator[int, None, None]:
         tracking_loss = 0
         with torch.inference_mode():
-            for (
-                out_frame_idx,
-                obj_ids,
-                out_mask_logits,
-            ) in self.video_predictor.propagate_in_video(
-                inference_state=self.inference_state,
-                start_frame_idx=start_frame_idx,
-                reverse=reverse,
-            ):  
-                
-                valid_mask_found = False
-                
-
-                frame_tensor = self.inference_state["images"][out_frame_idx]
-                frame = frame_tensor.cpu().numpy().transpose(1,2,0).astype(np.uint8)
-
-                for obj_id, mask_logits in zip(obj_ids, out_mask_logits):
-
-                    mask_torch = mask_logits > 0.5
-
-                    if not mask_torch.any():
-                        continue
+            with torch.autocast(device_type="cuda", enabled=False):  # disables BFloat16
+                for (
+                    out_frame_idx,
+                    obj_ids,
+                    out_mask_logits,
+                ) in self.video_predictor.propagate_in_video(
+                    inference_state=self.inference_state,
+                    start_frame_idx=start_frame_idx,
+                    reverse=reverse,
+                ):  
                     
-                    valid_mask_found = True
-                    x1, y1, x2, y2 = (
-                        masks_to_boxes(mask_torch)[0].cpu().numpy().astype(np.int32)
-                    )
+                    valid_mask_found = False
+                    
 
-                    mask = mask_torch.to(torch.uint8).cpu().numpy()
+                    frame_tensor = self.inference_state["images"][out_frame_idx]
+                    frame = frame_tensor.cpu().numpy().transpose(1,2,0).astype(np.uint8)
+
+                    for obj_id, mask_logits in zip(obj_ids, out_mask_logits):
+
+                        mask_torch = mask_logits > 0.5
+
+                        if not mask_torch.any():
+                            continue
+                        
+                        valid_mask_found = True
+                        x1, y1, x2, y2 = (
+                            masks_to_boxes(mask_torch)[0].cpu().numpy().astype(np.int32)
+                        )
+
+                        mask = mask_torch.to(torch.uint8).cpu().numpy()
 
 
-                    x1, x2 = min(x1, x2), max(x1, x2)
-                    y1, y2 = min(y1, y2), max(y1, y2)
-                    print(mask)
-                    final_mask = mask[:, y1:y2, x1:x2]
+                        x1, x2 = min(x1, x2), max(x1, x2)
+                        y1, y2 = min(y1, y2), max(y1, y2)
+                        print(mask)
+                        final_mask = mask[:, y1:y2, x1:x2]
 
 
-                    frame_roi = frame[y1:y2, x1:x2, :]
+                        frame_roi = frame[y1:y2, x1:x2, :]
 
-                    file_path = self.class_folders[obj_id] / f"{out_frame_idx}.npz"
-                    np.savez(file_path,
-                        mask=final_mask,
-                        box=np.array([x1,y1,x2,y2],dtype=np.int32),
-                        roi=frame_roi,
-                        class_id=obj_id,
-                        frame_idx=out_frame_idx
-                    )
-                if not valid_mask_found:
-                    tracking_loss += 1
-                else:
-                    tracking_loss = 0
-                if tracking_loss >= self.GRACE_PERIOD:
-                    break
-                yield out_frame_idx
+                        file_path = self.class_folders[obj_id] / f"{out_frame_idx}.npz"
+                        np.savez(file_path,
+                            mask=final_mask,
+                            box=np.array([x1,y1,x2,y2],dtype=np.int32),
+                            roi=frame_roi,
+                            class_id=obj_id,
+                            frame_idx=out_frame_idx
+                        )
+                    if not valid_mask_found:
+                        tracking_loss += 1
+                    else:
+                        tracking_loss = 0
+                    if tracking_loss >= self.GRACE_PERIOD:
+                        break
+                    yield out_frame_idx
 
 
 
