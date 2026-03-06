@@ -16,13 +16,15 @@ from src.api.repositories import classes_repo
 from src.api.services import annotations_service, sam2_service
 from ..utils import image_utils
 import time
+from src.config import MAX_INFERENCE_STATE_FRAMES
 
 from src.config import (
     TRACKING_RESULTS_PATH,
     Sam2Checkpoints,
 )
 from src.utils import extract_frames_to_dir, get_frame_from_dir
-
+torch.set_float32_matmul_precision("high")
+torch.set_default_dtype(torch.float32)
 
 class TrackingJob:
     GRACE_PERIOD: int = 25  # Number of frames to wait before considering a tracking loss
@@ -32,48 +34,32 @@ class TrackingJob:
     def __init__(
         self,
         annotations: list[AnnotationDTO],
+        video_path: Path,          
         frames_path: Path,
         results_path: Path,
         frame_count: int,
-        class_id: int,
         remove_previous_results: bool = True,
     ) -> None:
         self.annotations = sorted(annotations, key=lambda x: x.frame_idx)
         self.frames_path = frames_path
         self.results_path = results_path
         self.frame_count = frame_count
-        self.class_id = class_id
+        self.video_path = video_path 
         self.remove_previous_results = remove_previous_results
 
     def run(self) -> int:
-        start_time = time.perf_counter()
+
         self.initialize()
 
         total_frames_tracked = 0
-        annotations_frame_idx = [annotation.frame_idx for annotation in self.annotations]
-        last_tracked_annotation = -1
 
-        while last_tracked_annotation != len(self.annotations) - 1:
-            start_frame_idx = annotations_frame_idx[last_tracked_annotation + 1]
-            self.progress = start_frame_idx / self.frame_count
+        # forward pass
+        for _ in self.track_until_loss(0, reverse=False):
+            total_frames_tracked += 1
 
-            # Track backwards until tracking loss:
-            for _ in self.track_until_loss(start_frame_idx, reverse=True):
-                total_frames_tracked += 1
-
-            # Track forwards until tracking loss:
-            for frame_idx in self.track_until_loss(start_frame_idx):
-                self.progress = frame_idx / self.frame_count
-
-                elapsed = time.perf_counter() - start_time
-
-                if self.progress > 0:
-                    total_estimated = elapsed / self.progress
-                    self.eta_seconds = max(total_estimated - elapsed, 0)
-                total_frames_tracked += 1
-
-                if frame_idx in annotations_frame_idx:
-                    last_tracked_annotation = annotations_frame_idx.index(frame_idx)
+        # backward pass
+        for _ in self.track_until_loss(self.frame_count - 1, reverse=True):
+            total_frames_tracked += 1
 
         self.teardown()
 
@@ -82,15 +68,16 @@ class TrackingJob:
     def initialize(self) -> None:
         # Load the video predictor and initialize the inference state
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-        self.video_predictor = sam2_service.load_video_predictor(Sam2Checkpoints.LARGE)
-        self.inference_state = self.video_predictor.init_state(
-            video_path=str(self.frames_path), async_loading_frames=True
+        torch.set_autocast_enabled(False)
+        # 1. Laad predictor
+        self.video_predictor = sam2_service.load_video_predictor(
+            Sam2Checkpoints.LARGE,
+            max_inference_state_frames=MAX_INFERENCE_STATE_FRAMES
         )
-        self.img_std = self.inference_state["images"].img_std.to(device)
-        self.img_mean = self.inference_state["images"].img_mean.to(device)
 
+        # 2. Initialiseer inference state
+        self.inference_state = self.video_predictor.init_state(video_path=str(self.video_path))
+        self.inference_state["images"] = self.inference_state["images"].to(device).float()
         # Remove the results directory if it already exists
         if self.results_path.exists() and self.remove_previous_results:
             shutil.rmtree(self.results_path)
@@ -99,6 +86,15 @@ class TrackingJob:
             # Create the results directory
             self.results_path.mkdir(parents=True, exist_ok=True)
 
+        self.class_folders = {}
+
+        unique_classes = {a.simroom_class_id for a in self.annotations}
+
+        for obj_id in unique_classes:
+            folder = self.results_path / str(obj_id)
+            folder.mkdir(parents=True, exist_ok=True)
+            self.class_folders[obj_id] = folder
+
         # Add the initial points to the video predictor
         for annotation in self.annotations:
             point_labels = annotation.point_labels
@@ -106,7 +102,6 @@ class TrackingJob:
                 (int(point_label.x), int(point_label.y)) for point_label in point_labels
             ]
             labels = [point_label.label for point_label in point_labels]
-
             self.video_predictor.add_new_points(
                 inference_state=self.inference_state,
                 frame_idx=annotation.frame_idx,
@@ -128,7 +123,7 @@ class TrackingJob:
         self, start_frame_idx: int, reverse: bool = False
     ) -> Generator[int, None, None]:
         tracking_loss = 0
-        with torch.amp.autocast("cuda"):  # type: ignore[attr-defined]
+        with torch.inference_mode():
             for (
                 out_frame_idx,
                 obj_ids,
@@ -137,8 +132,13 @@ class TrackingJob:
                 inference_state=self.inference_state,
                 start_frame_idx=start_frame_idx,
                 reverse=reverse,
-            ):
-                yield out_frame_idx
+            ):  
+                
+                valid_mask_found = False
+                
+
+                frame_tensor = self.inference_state["images"][out_frame_idx]
+                frame = frame_tensor.cpu().numpy().transpose(1,2,0).astype(np.uint8)
 
                 for obj_id, mask_logits in zip(obj_ids, out_mask_logits):
 
@@ -146,40 +146,39 @@ class TrackingJob:
 
                     if not mask_torch.any():
                         continue
-
+                    
+                    valid_mask_found = True
                     x1, y1, x2, y2 = (
                         masks_to_boxes(mask_torch)[0].cpu().numpy().astype(np.int32)
                     )
 
-                    mask = mask_torch.cpu().numpy().astype(np.uint8)
+                    mask = mask_torch.to(torch.uint8).cpu().numpy()
+
 
                     x1, x2 = min(x1, x2), max(x1, x2)
                     y1, y2 = min(y1, y2), max(y1, y2)
-
+                    print(mask)
                     final_mask = mask[:, y1:y2, x1:x2]
 
-                    frame: UInt8Array = self.inference_state["images"].last_loaded_image
+
                     frame_roi = frame[y1:y2, x1:x2, :]
 
-                    # 🔥 SAVE PER CLASS
-                    class_folder = self.results_path / str(obj_id)
-                    class_folder.mkdir(exist_ok=True)
-
-                    file_path = class_folder / f"{out_frame_idx}.npz"
-
-                    np.savez_compressed(
-                        file_path,
+                    file_path = self.class_folders[obj_id] / f"{out_frame_idx}.npz"
+                    np.savez(file_path,
                         mask=final_mask,
-                        box=np.array([x1, y1, x2, y2]).astype(np.int32),
+                        box=np.array([x1,y1,x2,y2],dtype=np.int32),
                         roi=frame_roi,
                         class_id=obj_id,
-                        frame_idx=out_frame_idx,
+                        frame_idx=out_frame_idx
                     )
-                else:
+                if not valid_mask_found:
                     tracking_loss += 1
-
+                else:
+                    tracking_loss = 0
                 if tracking_loss >= self.GRACE_PERIOD:
                     break
+                yield out_frame_idx
+
 
 
 class Labeler:
@@ -287,6 +286,7 @@ class Labeler:
         self._current_frame_idx = frame_idx
         self._current_frame = get_frame_from_dir(frame_idx, self._frames_path)
         self._image_predictor.set_image(self._current_frame)
+        print(f"Video frames: {self.frame_count}, requested frame: {frame_idx}")
 
     def set_selected_class_id(self, db: Session, class_id: int | None = None) -> None:
         if class_id is None:

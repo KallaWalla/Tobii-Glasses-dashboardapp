@@ -1,4 +1,7 @@
+import shutil
+
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from src.api.models.pydantic import SAMAnnotationDTO
 from sqlalchemy.orm import Session
 from pathlib import Path
 import numpy as np
@@ -9,7 +12,7 @@ from typing import Dict
 
 from src.api.db import get_db
 from src.api.repositories import classes_repo
-from src.api.services import recordings_service, annotations_service
+from src.api.services import recordings_service
 from src.api.services.gaze_service import (
     get_gaze_position_per_frame,
     mask_was_viewed,
@@ -23,7 +26,12 @@ from src.api.models.analysis import (
     ViewSegment,
 )
 from src.utils import extract_frames_to_dir
-
+from src.api.services.embeddings_service import get_embeddings,dinov2_model
+from PIL import Image
+import torch.nn.functional as F
+from sklearn.cluster import KMeans
+torch.set_float32_matmul_precision("high")
+torch.set_autocast_enabled(False)
 
 router = APIRouter(prefix="/analyse")
 
@@ -68,37 +76,127 @@ async def run_analysis(
         frame_count=frame_count,
     )
 
-    all_annotations = []
+
+    all_annotations: list[SAMAnnotationDTO] = []
+    class_map = {}
+
+
+    # ---------------------------------
+    # Generate frame embeddings
+    # ---------------------------------
+    samples: list[np.ndarray] = [
+        np.array(Image.open(frame_path).convert("RGB"))
+        for frame_path in frame_files
+    ]
+
+    frame_embeddings = [None] * len(samples)
+
+    for embeddings, start, end in get_embeddings(dinov2_model, samples):
+        for i, emb in enumerate(embeddings):
+            frame_embeddings[start + i] = emb.cpu()
+
+    embedding_tensor = torch.stack(frame_embeddings).float()
+    embedding_tensor = F.normalize(embedding_tensor, dim=1)
+
+    # ---------------------------------
+    # Select frames where gaze exists
+    # ---------------------------------
+    gaze_frames = sorted(gaze_positions.keys())
+
+    if len(gaze_frames) == 0:
+        gaze_frames = list(range(0, frame_count, 30))  # fallback every 30 frames
+
+    gaze_embeddings = embedding_tensor[gaze_frames]
+
+    # ---------------------------------
+    # Cluster gaze embeddings
+    # ---------------------------------
+    num_clusters = min(5, len(gaze_frames))
+
+    kmeans = KMeans(n_clusters=num_clusters, random_state=0)
+    cluster_ids = kmeans.fit_predict(gaze_embeddings.numpy())
+
+    # ---------------------------------
+    # Pick representative frame per cluster
+    # ---------------------------------
+    selected_frames = []
+
+    for cluster_id in range(num_clusters):
+
+        indices = [i for i, cid in enumerate(cluster_ids) if cid == cluster_id]
+
+        cluster_frames = [gaze_frames[i] for i in indices]
+
+        cluster_embeddings = gaze_embeddings[indices]
+
+        center = torch.tensor(
+            kmeans.cluster_centers_[cluster_id]
+        ).unsqueeze(0)
+
+        sims = torch.mm(cluster_embeddings, center.T).squeeze()
+
+        best_idx = torch.argmax(sims).item()
+
+        selected_frames.append(cluster_frames[best_idx])
+
+    # ---------------------------------
+    # Create annotations
+    # ---------------------------------
+    all_annotations: list[SAMAnnotationDTO] = []
     class_map = {}
 
     for class_id in body.class_ids:
+
         sim_class = classes_repo.get_class(db, class_id)
-        if sim_class is None:
+        if not sim_class:
             continue
 
-        annotations = annotations_service.get_all_annotations_by_class_id(
-            db=db,
-            class_id=class_id,
-        )
-
-        if not annotations:
-            continue
-
-        all_annotations.extend(annotations)
         class_map[class_id] = sim_class
+
+        for frame_idx in selected_frames:
+
+            if frame_idx not in gaze_positions:
+                continue
+
+            gaze_x, gaze_y = gaze_positions[frame_idx]
+
+            annotation = SAMAnnotationDTO(
+                id=str(uuid.uuid4()),
+                simroom_class_id=class_id,
+                frame_idx=frame_idx,
+                point_labels=[
+                    {
+                        "x": int(gaze_x),
+                        "y": int(gaze_y),
+                        "label": 1,
+                    }
+                ],
+            )
+
+            all_annotations.append(annotation)
 
     if not all_annotations:
         return {"job_id": job_id}
+    
 
-    temp_results_dir = frames_dir / "multi_tracking"
+
+
+    sam2_frames_dir = Path(tempfile.mkdtemp())
+    for f in frames_dir.iterdir():
+        if f.is_file() and f.suffix.lower() == ".jpg":
+            shutil.copy(f, sam2_frames_dir / f.name)
+
+    # Maak result dir
+    temp_results_dir = Path(tempfile.mkdtemp()) / "multi_tracking"
     temp_results_dir.mkdir(exist_ok=True)
 
+    # TrackingJob aanmaken
     tracking_job = TrackingJob(
         annotations=all_annotations,
         frames_path=frames_dir,
         results_path=temp_results_dir,
         frame_count=frame_count,
-        class_id=-1,
+        video_path=sam2_frames_dir,
     )
 
     ACTIVE_JOBS[job_id] = tracking_job
@@ -107,6 +205,11 @@ async def run_analysis(
     # Background runner
     # -----------------------------
     def job_runner():
+        tracking_job.run()
+
+        
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
         tracking_job.run()
 
         results = []
@@ -129,15 +232,26 @@ async def run_analysis(
 
                 gaze_position = gaze_positions[frame_idx]
                 mask = torch.tensor(data["mask"])
+                box = data["box"]
 
-                frame_height, frame_width = 1080, 1920
-                mask_height, mask_width = mask.shape[-2], mask.shape[-1]
+                x1, y1, x2, y2 = box
 
-                gaze_x_scaled = gaze_position[0] * mask_width / frame_width
-                gaze_y_scaled = gaze_position[1] * mask_height / frame_height
+                gaze_x, gaze_y = gaze_position
 
-                if mask_was_viewed(mask, (gaze_x_scaled, gaze_y_scaled)):
-                    viewed_frames.append(frame_idx)
+                # check if gaze inside bounding box
+                if not (x1 <= gaze_x < x2 and y1 <= gaze_y < y2):
+                    continue
+
+                # convert to ROI coordinates
+                roi_x = int(gaze_x - x1)
+                roi_y = int(gaze_y - y1)
+
+                # check mask bounds
+                h, w = mask.shape[-2], mask.shape[-1]
+
+                if 0 <= roi_x < w and 0 <= roi_y < h:
+                    if mask_was_viewed(mask, (roi_x, roi_y)):
+                        viewed_frames.append(frame_idx)
 
             viewed_frames = sorted(viewed_frames)
 

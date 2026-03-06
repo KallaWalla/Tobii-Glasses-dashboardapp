@@ -4,34 +4,65 @@ import numpy as np
 import torch
 from sam2.build_sam import build_sam2, build_sam2_video_predictor
 from sam2.sam2_image_predictor import SAM2ImagePredictor
-from sam2.sam2_video_predictor import SAM2VideoPredictor
 from torchvision.ops import masks_to_boxes
 
 from src.aliases import Int32Array, UInt8Array
 from src.api.exceptions import PredictionFailedError
 from src.config import MAX_INFERENCE_STATE_FRAMES, SAM_2_MODEL_CONFIGS
 
-
+torch.set_autocast_enabled(False)
 def load_predictor(checkpoint_path: Path) -> SAM2ImagePredictor:
     model_cfg = SAM_2_MODEL_CONFIGS[checkpoint_path]
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    predictor = SAM2ImagePredictor(build_sam2(model_cfg, str(checkpoint_path), device=device))
+    # Zorg dat Hydra een bestaand bestand kan vinden
+    config_file = Path("configs/sam2/sam2.1_hiera_l.yaml").resolve()  # <== pas dit aan
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    sam2_model = build_sam2(str(config_file), str(checkpoint_path), device=device)
+    sam2_model = sam2_model.float()
+    predictor = SAM2ImagePredictor(sam2_model)
     return predictor
 
 
-def load_video_predictor(
-    checkpoint_path: Path, max_inference_state_frames: int = MAX_INFERENCE_STATE_FRAMES
-) -> SAM2VideoPredictor:
-    model_cfg = SAM_2_MODEL_CONFIGS[checkpoint_path]
-    print(checkpoint_path, model_cfg)
+
+def load_video_predictor(checkpoint_path: Path, max_inference_state_frames: int = MAX_INFERENCE_STATE_FRAMES):
+    ckpt_name = checkpoint_path.stem.upper()
+    if "LARGE" in ckpt_name:
+        image_size = 1024
+        config_file = Path("configs/sam2/sam2.1_hiera_l.yaml")
+    elif "SMALL" in ckpt_name:
+        image_size = 512
+        config_file = Path("configs/sam2/sam2.1_hiera_s.yaml")
+    elif "BASE" in ckpt_name:
+        image_size = 512
+        config_file = Path("configs/sam2/sam2.1_hiera_b+.yaml")
+    elif "TINY" in ckpt_name:
+        image_size = 256
+        config_file = Path("configs/sam2/sam2.1_hiera_t.yaml")
+    else:
+        image_size = 512
+        config_file = Path("configs/sam2/sam2.1_hiera_s.yaml")  # fallback
+
+    config_file = config_file.resolve()  # Zorg dat het absolute pad is
+    config_file = Path("configs/sam2/sam2.1_hiera_l.yaml").resolve()
+
     predictor = build_sam2_video_predictor(
-        model_cfg,
+        str(config_file),
         str(checkpoint_path),
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+        device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
         max_cond_frames_in_attn=max_inference_state_frames,
         clear_non_cond_mem_around_input=True,
+        image_size=image_size,
+        async_loading_frames=True,
     )
+    # Force **entire model** to float32
+    def force_float32(module):
+        for m in module.modules():
+            if hasattr(m, "weight") and m.weight is not None:
+                m.to(torch.float32)
+        return module
+
+    predictor.model = force_float32(predictor.model)
+
     return predictor
 
 

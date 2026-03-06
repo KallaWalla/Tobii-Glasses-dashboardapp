@@ -36,6 +36,8 @@ export const LabelingAPI = {
 
   getAnnotations: async () => {
     const response = await api.get('/annotations');
+    console.log(response.data);
+    
     return response.data;
   },
 

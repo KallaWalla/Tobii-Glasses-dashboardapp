@@ -40,12 +40,15 @@ export default function EyeTracking() {
 
 
   function formatSeconds(sec: number | null) {
-    if (sec === null) return "--:--";
-    const minutes = Math.floor(sec / 60);
+    if (sec === null) return "--:--:--";
+    const hours = Math.floor(sec / 3600);
+    const minutes = Math.floor((sec % 3600) / 60);
     const seconds = Math.floor(sec % 60);
-    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+    return `${hours.toString().padStart(2, "0")}:${minutes
+      .toString()
+      .padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
   }
-// Inside polling loop:
+
   useEffect(() => {
     const load = async () => {
       const rec = await RecordingsAPI.getLocal()
@@ -75,23 +78,20 @@ export default function EyeTracking() {
     setResult(null);
 
     try {
-      // 1. Start analysis and get job_id
       const { job_id } = await AnalysisAPI.runAnalysis(
         selectedRecording,
         selectedClasses
       );
 
-      // 2. Poll progress until finished
       let progress = 0;
       while (progress < 1) {
-        await new Promise((res) => setTimeout(res, 1000)); // 1s delay
+        await new Promise((res) => setTimeout(res, 1000)); 
         const data = await AnalysisAPI.getProgress(job_id);
         progress = data.progress;
         setProgress(progress);
         setEta(data.eta_seconds);
       }
 
-      // 3. Fetch final result
       const finalResult = await AnalysisAPI.getResult(job_id);
       setResult(finalResult);
     } finally {
@@ -198,7 +198,7 @@ return (
               {loading ? (
                 <>
                   <Loader2 className="animate-spin mr-2 h-4 w-4" />
-                  Analyse wordt uitgevoerd... ({(progress*100).toFixed(0)}%, ETA {formatSeconds(eta)})
+                  Analyse wordt uitgevoerd... ({(progress*100).toFixed(0)}%, Klaar in {formatSeconds(eta)})
                 </>
               ) : (
                 "Start Analyse"

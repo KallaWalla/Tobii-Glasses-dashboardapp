@@ -154,6 +154,15 @@ class AnnotationDTO(BaseDTO):
             if annotation.box_json
             else None,
         )
+class SAMPointDTO(BaseModel):
+    x: int
+    y: int
+    label: int  # 1 = positive point, 0 = negative point
+class SAMAnnotationDTO(BaseModel):
+    id: str
+    simroom_class_id: int
+    frame_idx: int
+    point_labels: list[SAMPointDTO]
 
 
 # ============================================================
