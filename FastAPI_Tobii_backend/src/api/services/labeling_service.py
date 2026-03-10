@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from torchvision.ops import masks_to_boxes
 
 from src.aliases import UInt8Array
-from src.api.models.pydantic import AnnotationDTO, CalibrationRecordingDTO
+from src.api.models.pydantic import AnnotationDTO, CalibrationRecordingDTO, SAMAnnotationDTO
 from src.api.repositories import classes_repo
 from src.api.services import annotations_service, sam2_service
 from ..utils import image_utils
@@ -23,8 +23,7 @@ from src.config import (
     Sam2Checkpoints,
 )
 from src.utils import extract_frames_to_dir, get_frame_from_dir
-torch.set_float32_matmul_precision("high")
-torch.set_default_dtype(torch.float32)
+
 
 class TrackingJob:
     GRACE_PERIOD: int = 25  # Number of frames to wait before considering a tracking loss
@@ -33,7 +32,7 @@ class TrackingJob:
 
     def __init__(
         self,
-        annotations: list[AnnotationDTO],
+        annotations: list[SAMAnnotationDTO],
         video_path: Path,          
         frames_path: Path,
         results_path: Path,
@@ -46,11 +45,12 @@ class TrackingJob:
         self.frame_count = frame_count
         self.video_path = video_path 
         self.remove_previous_results = remove_previous_results
-
+        self.tracked_frames = 0
+        self.total_frames_to_track = frame_count * 2
+        self.start_time = None
     def run(self) -> int:
-
         self.initialize()
-
+        self.start_time = time.time()
         total_frames_tracked = 0
 
         # forward pass
@@ -68,16 +68,15 @@ class TrackingJob:
     def initialize(self) -> None:
         # Load the video predictor and initialize the inference state
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        torch.set_autocast_enabled(False)
         # 1. Laad predictor
         self.video_predictor = sam2_service.load_video_predictor(
-            Sam2Checkpoints.LARGE,
+            Sam2Checkpoints.SMALL,
             max_inference_state_frames=MAX_INFERENCE_STATE_FRAMES
         )
 
         # 2. Initialiseer inference state
         self.inference_state = self.video_predictor.init_state(video_path=str(self.video_path))
-        self.inference_state["images"] = self.inference_state["images"].to(device).float()
+        self.inference_state["images"] = self.inference_state["images"].to(device)
         # Remove the results directory if it already exists
         if self.results_path.exists() and self.remove_previous_results:
             shutil.rmtree(self.results_path)
@@ -124,7 +123,7 @@ class TrackingJob:
     ) -> Generator[int, None, None]:
         tracking_loss = 0
         with torch.inference_mode():
-            with torch.autocast(device_type="cuda", enabled=False):  # disables BFloat16
+            with torch.autocast(device_type="cuda"):  # disables BFloat16
                 for (
                     out_frame_idx,
                     obj_ids,
@@ -153,14 +152,12 @@ class TrackingJob:
                             masks_to_boxes(mask_torch)[0].cpu().numpy().astype(np.int32)
                         )
 
-                        mask = mask_torch.to(torch.uint8).cpu().numpy()
+                        mask = mask_torch.squeeze().to(torch.uint8).cpu().numpy()
 
 
                         x1, x2 = min(x1, x2), max(x1, x2)
                         y1, y2 = min(y1, y2), max(y1, y2)
-                        print(mask)
-                        final_mask = mask[:, y1:y2, x1:x2]
-
+                        final_mask = mask[y1:y2, x1:x2]
 
                         frame_roi = frame[y1:y2, x1:x2, :]
 
@@ -178,8 +175,21 @@ class TrackingJob:
                         tracking_loss = 0
                     if tracking_loss >= self.GRACE_PERIOD:
                         break
+                    self.tracked_frames += 1
+                    self.update_progress()
                     yield out_frame_idx
+    def update_progress(self):
+        if self.tracked_frames == 0:
+            return
 
+        self.progress = self.tracked_frames / self.total_frames_to_track
+
+        elapsed = time.time() - self.start_time
+        seconds_per_frame = elapsed / self.tracked_frames
+
+        remaining_frames = self.total_frames_to_track - self.tracked_frames
+
+        self.eta_seconds = int(seconds_per_frame * remaining_frames)
 
 
 class Labeler:
@@ -197,7 +207,7 @@ class Labeler:
 
         self._frame_count = len(list(self._frames_path.glob("*.jpg")))
         self._image_predictor: SAM2ImagePredictor = sam2_service.load_predictor(
-            Sam2Checkpoints.LARGE
+            Sam2Checkpoints.SMALL
         )
 
         self._current_frame_idx: int = 0

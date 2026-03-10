@@ -64,3 +64,22 @@ def clean_recordings(db: Session, recordings_path: Path = RECORDINGS_PATH) -> No
             file.unlink()
     
     db.commit()
+
+
+def get_recording_by_calibration_id(
+    db: Session, calibration_id: int
+) -> RecordingDTO:
+    """Get a recording via a calibration recording id"""
+
+    calibration_recording = (
+        db.query(CalibrationRecording)
+        .filter(CalibrationRecording.id == calibration_id)
+        .first()
+    )
+
+    if not calibration_recording:
+        raise NotFoundError(f"CalibrationRecording {calibration_id} not found")
+
+    rec = recordings_repo.get(db, calibration_recording.recording_id)
+
+    return RecordingDTO.from_orm(rec)

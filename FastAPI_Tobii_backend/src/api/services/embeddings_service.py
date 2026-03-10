@@ -1,9 +1,23 @@
+from pathlib import Path
+import tempfile
 import time
 from collections.abc import Generator
 
+from src.api.services import recordings_service
+from src.utils import extract_frames_to_dir, get_frame_from_dir
+from src.api.services import annotations_service
 import torch
 import torchvision.transforms as T
 from transformers import AutoImageProcessor, AutoModel, BitImageProcessor
+import torch.nn.functional as F
+
+import base64
+import numpy as np
+import cv2
+import torch
+import torch.nn.functional as F
+from torchvision import transforms
+from PIL import Image
 
 from src.aliases import UInt8Array
 
@@ -11,6 +25,7 @@ IMAGE_PROCESSOR: BitImageProcessor = AutoImageProcessor.from_pretrained(
     "facebook/dinov2-base"
 )
 EMBEDDING_DIM = 768
+
 
 crop_size = IMAGE_PROCESSOR.crop_size["height"]
 transformation_chain = T.Compose([
@@ -73,3 +88,48 @@ def get_embeddings(
     if log_performance:
         sps = total_samples / (time.time() - start_time)
         print(f"Generated {total_samples} embeddings at {sps:.2f} samples per second")
+
+# Reuse dinov2_model already imported from embeddings_service
+
+def get_crop_embedding(crop_bgr: np.ndarray) -> torch.Tensor:
+    """DINOv2 CLS-token embedding for a single BGR crop, normalized."""
+    rgb = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
+    pil = Image.fromarray(rgb)                                    # ← add this
+    tensor = transformation_chain(pil).unsqueeze(0).to(device).float()  # ← pass pil
+    with torch.no_grad():
+        emb = dinov2_model(tensor).last_hidden_state[:, 0].squeeze(0)
+    return F.normalize(emb, dim=0)
+
+
+def build_prototypes(class_map: dict) -> dict[int, torch.Tensor]:
+    """
+    For each SimRoomClass, decode annotation crops → DINOv2 embeddings → mean prototype.
+    """
+    prototypes = {}
+
+    for class_id, sim_class in class_map.items():
+        embeddings = []
+
+        for annotation in sim_class.annotations:
+            if not annotation.frame_crop_base64:
+                continue
+
+            img_bytes = base64.b64decode(annotation.frame_crop_base64)
+            img_array = np.frombuffer(img_bytes, dtype=np.uint8)
+            crop_bgr  = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
+            if crop_bgr is None or crop_bgr.size == 0:
+                continue
+
+            embeddings.append(get_crop_embedding(crop_bgr))
+
+        if not embeddings:
+            continue
+
+        prototype = torch.stack(embeddings).mean(dim=0)
+        prototypes[class_id] = F.normalize(prototype, dim=0)
+
+    return prototypes
+
+
+

@@ -164,7 +164,6 @@ async def delete_all_annotations(calibration_id: int, db: Session = Depends(get_
     for sim_class in classes:
         anns = annotations_repo.get_all_annotations_by_class_id(db, sim_class.id)
         annotations.extend(anns)
-    print(annotations)
     for ann in annotations:
         annotations_repo.delete_annotation(db, ann.id)
     

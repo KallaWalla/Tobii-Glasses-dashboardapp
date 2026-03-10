@@ -1,7 +1,9 @@
+import random
 import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from src.api.models.pydantic import SAMAnnotationDTO
+from src.api.services import sam2_service
+from src.api.models.pydantic import SAMAnnotationDTO, SAMPointDTO
 from sqlalchemy.orm import Session
 from pathlib import Path
 import numpy as np
@@ -18,7 +20,7 @@ from src.api.services.gaze_service import (
     mask_was_viewed,
 )
 from src.api.services.labeling_service import TrackingJob
-from src.config import TOBII_GLASSES_FPS
+from src.config import TOBII_GLASSES_FPS, Sam2Checkpoints
 from src.api.models.analysis import (
     AnalysisRequest,
     AnalysisResponse,
@@ -26,12 +28,11 @@ from src.api.models.analysis import (
     ViewSegment,
 )
 from src.utils import extract_frames_to_dir
-from src.api.services.embeddings_service import get_embeddings,dinov2_model
+# Replace the old broken import line:
+from src.api.services.embeddings_service import get_crop_embedding, build_prototypes 
 from PIL import Image
 import torch.nn.functional as F
-from sklearn.cluster import KMeans
-torch.set_float32_matmul_precision("high")
-torch.set_autocast_enabled(False)
+import cv2
 
 router = APIRouter(prefix="/analyse")
 
@@ -42,6 +43,8 @@ ACTIVE_JOBS: Dict[str, TrackingJob] = {}
 FINISHED_RESULTS: Dict[str, AnalysisResponse] = {}
 
 
+MIN_ANNOTATIONS_PER_CLASS = 5
+SIM_THRESHOLD = 0.6
 # -----------------------------------------
 # START ANALYSIS (NON BLOCKING)
 # -----------------------------------------
@@ -76,115 +79,103 @@ async def run_analysis(
         frame_count=frame_count,
     )
 
-
-    all_annotations: list[SAMAnnotationDTO] = []
     class_map = {}
 
-
-    # ---------------------------------
-    # Generate frame embeddings
-    # ---------------------------------
-    samples: list[np.ndarray] = [
-        np.array(Image.open(frame_path).convert("RGB"))
-        for frame_path in frame_files
-    ]
-
-    frame_embeddings = [None] * len(samples)
-
-    for embeddings, start, end in get_embeddings(dinov2_model, samples):
-        for i, emb in enumerate(embeddings):
-            frame_embeddings[start + i] = emb.cpu()
-
-    embedding_tensor = torch.stack(frame_embeddings).float()
-    embedding_tensor = F.normalize(embedding_tensor, dim=1)
+    for class_id in body.class_ids:
+        sim_class = classes_repo.get_class(db, class_id)
+        class_map[class_id] = sim_class
+    prototypes = build_prototypes(class_map)
 
     # ---------------------------------
     # Select frames where gaze exists
     # ---------------------------------
-    gaze_frames = sorted(gaze_positions.keys())
+
+    gaze_frames = [
+        frame_idx
+        for frame_idx, (x, y) in gaze_positions.items()
+        if x is not None and y is not None
+    ]
+
+    gaze_frames = sorted(gaze_frames)
+    annotations = []
 
     if len(gaze_frames) == 0:
-        gaze_frames = list(range(0, frame_count, 30))  # fallback every 30 frames
+        gaze_frames = list(range(0, frame_count, 30))
 
-    gaze_embeddings = embedding_tensor[gaze_frames]
 
-    # ---------------------------------
-    # Cluster gaze embeddings
-    # ---------------------------------
-    num_clusters = min(5, len(gaze_frames))
+    print("stap 1 alle data is opgehaald en geinistialiseerd", flush=True)
 
-    kmeans = KMeans(n_clusters=num_clusters, random_state=0)
-    cluster_ids = kmeans.fit_predict(gaze_embeddings.numpy())
-
-    # ---------------------------------
-    # Pick representative frame per cluster
-    # ---------------------------------
-    selected_frames = []
-
-    for cluster_id in range(num_clusters):
-
-        indices = [i for i, cid in enumerate(cluster_ids) if cid == cluster_id]
-
-        cluster_frames = [gaze_frames[i] for i in indices]
-
-        cluster_embeddings = gaze_embeddings[indices]
-
-        center = torch.tensor(
-            kmeans.cluster_centers_[cluster_id]
-        ).unsqueeze(0)
-
-        sims = torch.mm(cluster_embeddings, center.T).squeeze()
-
-        best_idx = torch.argmax(sims).item()
-
-        selected_frames.append(cluster_frames[best_idx])
-
-    # ---------------------------------
-    # Create annotations
-    # ---------------------------------
-    all_annotations: list[SAMAnnotationDTO] = []
-    class_map = {}
-
-    for class_id in body.class_ids:
-
-        sim_class = classes_repo.get_class(db, class_id)
-        if not sim_class:
-            continue
-
-        class_map[class_id] = sim_class
-
-        for frame_idx in selected_frames:
-
-            if frame_idx not in gaze_positions:
-                continue
-
-            gaze_x, gaze_y = gaze_positions[frame_idx]
-
-            annotation = SAMAnnotationDTO(
-                id=str(uuid.uuid4()),
-                simroom_class_id=class_id,
-                frame_idx=frame_idx,
-                point_labels=[
-                    {
-                        "x": int(gaze_x),
-                        "y": int(gaze_y),
-                        "label": 1,
-                    }
-                ],
+    sam2_model = sam2_service.load_generator(
+                Sam2Checkpoints.SMALL
             )
+    for frame_target in [5, 10,15,20]:
 
-            all_annotations.append(annotation)
+        sampled_frames = sample_frames_evenly(gaze_frames, frame_target)
 
-    if not all_annotations:
+        print(f"running analysis with {frame_target} frames", flush=True)
+
+        for frame_idx in sampled_frames:
+
+            frame_path = frame_files[frame_idx]
+            frame_img     = cv2.imread(str(frame_path))          # BGR uint8
+            frame_img_rgb = cv2.cvtColor(frame_img, cv2.COLOR_BGR2RGB)  # RGB uint8
+            
+            mask_dicts = sam2_model.generate(frame_img_rgb)      # List[Dict]
+            masks      = [m["segmentation"] for m in mask_dicts] # List[np.ndarray HW bool]
+
+
+            # ---------------------------------
+            # SAM2 segmentation
+            # ---------------------------------
+
+
+            print("stap 2.1 masks generated", flush=True)
+
+            # ---------------------------------
+            # Match masks to classes
+            # ---------------------------------
+            matches = match_masks_to_classes(masks, frame_img, prototypes)
+
+            print("stap 2.2 masks matched", flush=True)
+
+            # ---------------------------------
+            # Create annotations
+            # ---------------------------------
+
+            for class_id, (x1, y1, x2, y2), score in matches:
+
+                if score < SIM_THRESHOLD:
+                    continue
+
+                cx = int((x1 + x2) / 2)
+                cy = int((y1 + y2) / 2)
+
+                annotations.append(
+                    SAMAnnotationDTO(
+                        id=str(uuid.uuid4()),
+                        simroom_class_id=class_id,
+                        frame_idx=frame_idx,
+                        point_labels=[SAMPointDTO(x=cx, y=cy, label=1)]  # ← proper object
+                    )
+                )
+
+            print("stap 2.4 annotations done", flush=True)
+
+        # ---------------------------------
+        # Stop if enough annotations
+        # ---------------------------------
+
+        if enough_annotations(annotations, body.class_ids):
+            print("genoeg annotaties gevonden", flush=True)
+            break
+
+
+    if not annotations:
         return {"job_id": job_id}
     
 
+    print("stap 2 alle annotaties geinistialiseerd", flush=True)
 
-
-    sam2_frames_dir = Path(tempfile.mkdtemp())
-    for f in frames_dir.iterdir():
-        if f.is_file() and f.suffix.lower() == ".jpg":
-            shutil.copy(f, sam2_frames_dir / f.name)
 
     # Maak result dir
     temp_results_dir = Path(tempfile.mkdtemp()) / "multi_tracking"
@@ -192,36 +183,28 @@ async def run_analysis(
 
     # TrackingJob aanmaken
     tracking_job = TrackingJob(
-        annotations=all_annotations,
+        annotations=annotations,
         frames_path=frames_dir,
         results_path=temp_results_dir,
         frame_count=frame_count,
-        video_path=sam2_frames_dir,
+        video_path=frames_dir,
     )
+    print("stap 3 Trackinjob geinistialiseerd", flush=True)
 
     ACTIVE_JOBS[job_id] = tracking_job
-
     # -----------------------------
     # Background runner
     # -----------------------------
     def job_runner():
         tracking_job.run()
-
-        
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        tracking_job.run()
-
+        print("stap 4 Trackinjob run gedaan", flush=True)
         results = []
-
         # Evaluate gaze per class
         for class_id, sim_class in class_map.items():
-
+            frame_owner = {}
             class_dir = temp_results_dir / str(class_id)
             if not class_dir.exists():
                 continue
-
-            viewed_frames = []
 
             for npz_file in class_dir.glob("*.npz"):
                 data = np.load(str(npz_file))
@@ -229,31 +212,23 @@ async def run_analysis(
 
                 if frame_idx not in gaze_positions:
                     continue
+                gaze_x, gaze_y = gaze_positions[frame_idx]
 
-                gaze_position = gaze_positions[frame_idx]
-                mask = torch.tensor(data["mask"])
-                box = data["box"]
-
-                x1, y1, x2, y2 = box
-
-                gaze_x, gaze_y = gaze_position
-
-                # check if gaze inside bounding box
+                x1, y1, x2, y2 = data["box"]
                 if not (x1 <= gaze_x < x2 and y1 <= gaze_y < y2):
                     continue
 
-                # convert to ROI coordinates
+                mask = torch.tensor(data["mask"]).squeeze(0)
                 roi_x = int(gaze_x - x1)
                 roi_y = int(gaze_y - y1)
+                
+                if not (0 <= roi_x < mask.shape[1] and 0 <= roi_y < mask.shape[0]):
+                    continue
 
-                # check mask bounds
-                h, w = mask.shape[-2], mask.shape[-1]
+                if mask_was_viewed(mask, (roi_x, roi_y)):
+                    frame_owner[frame_idx] = class_id
 
-                if 0 <= roi_x < w and 0 <= roi_y < h:
-                    if mask_was_viewed(mask, (roi_x, roi_y)):
-                        viewed_frames.append(frame_idx)
-
-            viewed_frames = sorted(viewed_frames)
+            viewed_frames = sorted(frame_owner.keys())
 
             segments = []
             start = None
@@ -293,6 +268,8 @@ async def run_analysis(
 
         ACTIVE_JOBS.pop(job_id, None)
 
+
+    
     background_tasks.add_task(job_runner)
 
     return {"job_id": job_id}
@@ -325,3 +302,79 @@ async def get_result(job_id: str):
         raise HTTPException(status_code=404, detail="Result not ready")
 
     return result
+
+
+
+
+def sample_frames_evenly(frame_indices: list[int], n: int) -> list[int]:
+    """Select n evenly spaced frames from a list."""
+    if len(frame_indices) <= n:
+        return frame_indices
+
+    step = len(frame_indices) / n
+    return [frame_indices[int(i * step)] for i in range(n)]
+
+
+def annotations_per_class(annotations):
+    counts = {}
+    for ann in annotations:
+        cid = ann.simroom_class_id
+        counts[cid] = counts.get(cid, 0) + 1
+    return counts
+
+
+def enough_annotations(annotations, class_ids):
+    counts = annotations_per_class(annotations)
+
+    for cid in class_ids:
+        if counts.get(cid, 0) < MIN_ANNOTATIONS_PER_CLASS:
+            return False
+
+    return True
+
+
+def mask_to_bbox(mask):
+    """Convert SAM mask to bounding box."""
+    ys, xs = mask.nonzero()
+
+    if len(xs) == 0 or len(ys) == 0:
+        return None
+
+    x1, x2 = xs.min(), xs.max()
+    y1, y2 = ys.min(), ys.max()
+
+    return (x1, y1, x2, y2)
+
+
+def match_masks_to_classes(masks, frame_img, prototypes: dict[int, torch.Tensor]):
+    matches = []
+
+    for mask in masks:
+        bbox = mask_to_bbox(mask)
+        if bbox is None:
+            continue
+
+        x1, y1, x2, y2 = bbox
+        crop = frame_img[y1:y2, x1:x2]
+
+        if crop.size == 0:
+            continue
+
+        crop_emb = get_crop_embedding(crop)
+
+        best_class = None
+        best_score = 0.0
+
+        for class_id, prototype in prototypes.items():
+            score = F.cosine_similarity(
+                crop_emb.unsqueeze(0),
+                prototype.unsqueeze(0)
+            ).item()
+
+            if score > best_score:
+                best_score = score
+                best_class = class_id
+
+        matches.append((best_class, bbox, best_score))
+
+    return matches

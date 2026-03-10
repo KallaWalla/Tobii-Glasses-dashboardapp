@@ -220,14 +220,11 @@ return (
         <Card className="shadow-xl border-0 rounded-2xl overflow-hidden h-full">
           <CardHeader className="bg-[#16B0A5] text-white">
             <CardTitle>
-              Analyse Resultaten
+             3. Analyse Resultaten
             </CardTitle>
-            <CardDescription>
-              Overzicht van totale kijktijd en specifieke kijkmomenten per geselecteerd object.
-            </CardDescription>
           </CardHeader>
 
-          <CardContent className="space-y-8">
+          <CardContent className="space-y-8 py-4">
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
               {result.classes.map((cls: ClassAnalysisResult) => (
@@ -235,7 +232,7 @@ return (
                   key={cls.class_id}
                   className="rounded-2xl border bg-[#FAFDFF] p-6 shadow-sm hover:shadow-md transition"
                 >
-                  <h3 className="font-semibold text-lg text-[#4CA2D5]">
+                  <h3 className="font-semibold text-lg text-[#16B0A5]">
                     {cls.class_name}
                   </h3>
 
