@@ -187,7 +187,7 @@ async def run_analysis(
         frames_path=frames_dir,
         results_path=temp_results_dir,
         frame_count=frame_count,
-        video_path=frames_dir,
+        video_path=video_path,
     )
     print("stap 3 Trackinjob geinistialiseerd", flush=True)
 
@@ -196,77 +196,84 @@ async def run_analysis(
     # Background runner
     # -----------------------------
     def job_runner():
-        tracking_job.run()
-        print("stap 4 Trackinjob run gedaan", flush=True)
-        results = []
-        # Evaluate gaze per class
-        for class_id, sim_class in class_map.items():
-            frame_owner = {}
-            class_dir = temp_results_dir / str(class_id)
-            if not class_dir.exists():
-                continue
-
-            for npz_file in class_dir.glob("*.npz"):
-                data = np.load(str(npz_file))
-                frame_idx = int(data["frame_idx"])
-
-                if frame_idx not in gaze_positions:
-                    continue
-                gaze_x, gaze_y = gaze_positions[frame_idx]
-
-                x1, y1, x2, y2 = data["box"]
-                if not (x1 <= gaze_x < x2 and y1 <= gaze_y < y2):
+        try:
+            tracking_job.run()
+            print("stap 4 Trackinjob run gedaan", flush=True)
+            results = []
+            # Evaluate gaze per class
+            for class_id, sim_class in class_map.items():
+                frame_owner = {}
+                class_dir = temp_results_dir / str(class_id)
+                if not class_dir.exists():
                     continue
 
-                mask = torch.tensor(data["mask"]).squeeze(0)
-                roi_x = int(gaze_x - x1)
-                roi_y = int(gaze_y - y1)
-                
-                if not (0 <= roi_x < mask.shape[1] and 0 <= roi_y < mask.shape[0]):
-                    continue
+                for npz_file in class_dir.glob("*.npz"):
+                    data = np.load(str(npz_file))
+                    frame_idx = int(data["frame_idx"])
 
-                if mask_was_viewed(mask, (roi_x, roi_y)):
-                    frame_owner[frame_idx] = class_id
+                    if frame_idx not in gaze_positions:
+                        continue
+                    gaze_x, gaze_y = gaze_positions[frame_idx]
 
-            viewed_frames = sorted(frame_owner.keys())
+                    x1, y1, x2, y2 = data["box"]
+                    if not (x1 <= gaze_x < x2 and y1 <= gaze_y < y2):
+                        continue
 
-            segments = []
-            start = None
-            prev = None
+                    mask = torch.tensor(data["mask"]).squeeze(0)
+                    roi_x = int(gaze_x - x1)
+                    roi_y = int(gaze_y - y1)
+                    
+                    if not (0 <= roi_x < mask.shape[1] and 0 <= roi_y < mask.shape[0]):
+                        continue
 
-            for f in viewed_frames:
-                if start is None:
-                    start = f
-                elif prev is not None and f != prev + 1:
+                    if mask_was_viewed(mask, (roi_x, roi_y)):
+                        frame_owner[frame_idx] = class_id
+
+                viewed_frames = sorted(frame_owner.keys())
+
+                segments = []
+                start = None
+                prev = None
+
+                for f in viewed_frames:
+                    if start is None:
+                        start = f
+                    elif prev is not None and f != prev + 1:
+                        segments.append((start, prev))
+                        start = f
+                    prev = f
+
+                if start is not None:
                     segments.append((start, prev))
-                    start = f
-                prev = f
 
-            if start is not None:
-                segments.append((start, prev))
+                total_frames = sum(end - start + 1 for start, end in segments)
+                total_seconds = total_frames / fps
 
-            total_frames = sum(end - start + 1 for start, end in segments)
-            total_seconds = total_frames / fps
-
-            results.append(
-                ClassAnalysisResult(
-                    class_id=class_id,
-                    class_name=sim_class.class_name,
-                    total_view_time_seconds=total_seconds,
-                    view_segments=[
-                        ViewSegment(start_frame=s, end_frame=e)
-                        for s, e in segments
-                    ],
+                results.append(
+                    ClassAnalysisResult(
+                        class_id=class_id,
+                        class_name=sim_class.class_name,
+                        total_view_time_seconds=total_seconds,
+                        view_segments=[
+                            ViewSegment(start_frame=s, end_frame=e)
+                            for s, e in segments
+                        ],
+                    )
                 )
+
+            FINISHED_RESULTS[job_id] = AnalysisResponse(
+                recording_id=recording_id,
+                fps=fps,
+                classes=results,
             )
-
-        FINISHED_RESULTS[job_id] = AnalysisResponse(
-            recording_id=recording_id,
-            fps=fps,
-            classes=results,
-        )
-
-        ACTIVE_JOBS.pop(job_id, None)
+        except Exception as e:
+            print(f"job_runner failed: {e}", flush=True)
+            import traceback; traceback.print_exc()
+            # Store an error marker so the client gets a real error
+            FINISHED_RESULTS[job_id] = None  # or a dedicated error respons
+        
+        finally:
+            ACTIVE_JOBS.pop(job_id, None)
 
 
     

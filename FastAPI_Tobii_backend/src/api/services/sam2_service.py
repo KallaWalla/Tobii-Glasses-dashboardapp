@@ -10,7 +10,15 @@ from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 from src.aliases import Int32Array, UInt8Array
 from src.api.exceptions import PredictionFailedError
 from src.config import MAX_INFERENCE_STATE_FRAMES
+# At the top of sam2_service.py, after imports
+import sam2.utils.misc as _sam2_misc
 
+_original_load_img = _sam2_misc._load_img_as_tensor
+
+def _patched_load_img(img_path, image_size=1024):
+    return _original_load_img(img_path, image_size)
+
+_sam2_misc._load_img_as_tensor = _patched_load_img
 def load_predictor(checkpoint_path: Path) -> SAM2ImagePredictor:
 
     # Zorg dat Hydra een bestaand bestand kan vinden
@@ -48,11 +56,12 @@ def load_video_predictor(checkpoint_path: Path, max_inference_state_frames: int 
         config_file = Path("configs/sam2/sam2.1_hiera_s.yaml")  # fallback
 
     config_file = Path("configs/sam2/sam2.1_hiera_s.yaml").resolve()
-
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(device)
     predictor = build_sam2_video_predictor(
         str(config_file),
         str(checkpoint_path),
-        device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+        device=device,
         max_cond_frames_in_attn=max_inference_state_frames,
         clear_non_cond_mem_around_input=True,
         image_size=image_size,

@@ -58,7 +58,8 @@ class TrackingJob:
             total_frames_tracked += 1
 
         # backward pass
-        for _ in self.track_until_loss(self.frame_count - 1, reverse=True):
+        actual_last_frame = self.inference_state["images"].shape[0] - 1
+        for _ in self.track_until_loss(actual_last_frame, reverse=True):
             total_frames_tracked += 1
 
         self.teardown()
