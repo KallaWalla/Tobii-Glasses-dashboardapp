@@ -163,6 +163,7 @@ class TrackingJob:
                         frame_roi = frame[y1:y2, x1:x2, :]
 
                         file_path = self.class_folders[obj_id] / f"{out_frame_idx}.npz"
+
                         np.savez(file_path,
                             mask=final_mask,
                             box=np.array([x1,y1,x2,y2],dtype=np.int32),

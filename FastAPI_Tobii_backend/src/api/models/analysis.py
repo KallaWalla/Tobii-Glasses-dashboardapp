@@ -22,4 +22,5 @@ class ClassAnalysisResult(BaseModel):
 class AnalysisResponse(BaseModel):
     recording_id: str
     fps: float
+    total_frames: int 
     classes: List[ClassAnalysisResult]

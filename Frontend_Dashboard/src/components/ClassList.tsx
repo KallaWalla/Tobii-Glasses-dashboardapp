@@ -5,7 +5,7 @@ import { LabelingAPI } from "@/api/LabelingAPI"
 import { PropsClassList } from "../types/classList"
 import { Button } from "./ui/button"
 import { SimRoomClass } from "../types/simrooms"
-import { Trash2, Plus } from "lucide-react"
+import { Trash2, Plus, CheckCircle2 } from "lucide-react"
 import { Input } from "./ui/input"
 import { ClassesAPI } from "../api/classesApi"
 
@@ -33,7 +33,10 @@ const ClassItem = memo(function ClassItem({
         color: "#fff",
       }}
     >
-      <span className="flex-1 truncate">{cls.class_name}</span>
+      <div className="flex items-center gap-2 flex-1 truncate">
+        {isActive && <CheckCircle2 className="h-4 w-4 shrink-0" />}
+        <span className="truncate">{cls.class_name}</span>
+      </div>
 
       <Button
         size="icon"

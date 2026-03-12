@@ -108,7 +108,7 @@ async def run_analysis(
     sam2_model = sam2_service.load_generator(
                 Sam2Checkpoints.SMALL
             )
-    for frame_target in [5, 10,15,20]:
+    for frame_target in [2,3,4,5,6,7,8,9]:
 
         sampled_frames = sample_frames_evenly(gaze_frames, frame_target)
 
@@ -264,6 +264,7 @@ async def run_analysis(
             FINISHED_RESULTS[job_id] = AnalysisResponse(
                 recording_id=recording_id,
                 fps=fps,
+                total_frames=frame_count,
                 classes=results,
             )
         except Exception as e:

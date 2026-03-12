@@ -13,5 +13,6 @@ export interface ClassAnalysisResult {
 export interface AnalysisResponse {
   recording_id: string
   fps: number
+  total_frames: number
   classes: ClassAnalysisResult[]
 }

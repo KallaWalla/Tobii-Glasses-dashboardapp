@@ -4,17 +4,13 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Loader2 } from "lucide-react"
 
 import { AnalysisAPI, AnalysisResponse } from "@/api/analysisApi"
 import { RecordingsAPI } from "@/api/recordingsApi"
 import { CalibrationRecording, SimRoomClass } from "../types/simrooms"
-import { ClassAnalysisResult, ViewSegment } from "../types/Analysis"
 import { Recording } from "../types/recording"
 import {
   Select,
@@ -26,6 +22,7 @@ import {
 import { ClassesAPI } from "../api/classesApi"
 import { ClassSelectionDialog } from "../components/VoorwerpSelectionDialog"
 import { CalibrationAPI } from "../api/calibrationsApi"
+import { AnalysisResults } from "../components/AnalysisResults"
 
 export default function EyeTracking() {
   const [classes, setClasses] = useState<SimRoomClass[]>([])
@@ -53,7 +50,6 @@ export default function EyeTracking() {
     const load = async () => {
       const rec = await RecordingsAPI.getLocal()
       setRecordings(rec)
-      if (rec.length > 0) setSelectedRecording(rec[0].id)
 
       const classes = await ClassesAPI.getClasses()
       const calibrationRecordings = await CalibrationAPI.getCalibrationRecordings()
@@ -193,7 +189,7 @@ return (
             <Button
               onClick={runAnalysis}
               className="w-full bg-[#4CA2D5] hover:bg-[#3B8CBF] text-white rounded-xl py-6 text-base"
-              disabled={loading || selectedClasses.length === 0}
+              disabled={loading || selectedClasses.length === 0 || !selectedRecording}
             >
               {loading ? (
                 <>
@@ -217,45 +213,10 @@ return (
       )}
       {/* RESULTS */}
       {result && (
-        <Card className="shadow-xl border-0 rounded-2xl overflow-hidden h-full">
-          <CardHeader className="bg-[#16B0A5] text-white">
-            <CardTitle>
-             3. Analyse Resultaten
-            </CardTitle>
-          </CardHeader>
-
-          <CardContent className="space-y-8 py-4">
-
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-              {result.classes.map((cls: ClassAnalysisResult) => (
-                <div
-                  key={cls.class_id}
-                  className="rounded-2xl border bg-[#FAFDFF] p-6 shadow-sm hover:shadow-md transition"
-                >
-                  <h3 className="font-semibold text-lg text-[#16B0A5]">
-                    {cls.class_name}
-                  </h3>
-
-                  <p className="mt-3 text-sm">
-                    Totale kijktijd:
-                    <span className="block text-xl font-bold mt-1">
-                      {cls.total_view_time_seconds.toFixed(2)} s
-                    </span>
-                  </p>
-
-                  <div className="mt-4 text-sm text-muted-foreground space-y-1 max-h-32 overflow-y-auto pr-2">
-                    {cls.view_segments.map((seg: ViewSegment, i: number) => {
-                      const startSec = (seg.start_frame / result.fps).toFixed(2);
-                      const endSec = (seg.end_frame / result.fps).toFixed(2);
-                      return <div key={i}>Tijd {startSec}s → {endSec}s</div>;
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-          </CardContent>
-        </Card>
+        <div>
+          <h2 className="text-2xl font-bold text-[#16B0A5] mb-6">3. Analyse Resultaten</h2>
+          <AnalysisResults result={result} />
+        </div>
       )}
 
     </div>

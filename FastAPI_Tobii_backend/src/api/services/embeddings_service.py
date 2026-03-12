@@ -100,7 +100,6 @@ def get_crop_embedding(crop_bgr: np.ndarray) -> torch.Tensor:
         emb = dinov2_model(tensor).last_hidden_state[:, 0].squeeze(0)
     return F.normalize(emb, dim=0)
 
-
 def build_prototypes(class_map: dict) -> dict[int, torch.Tensor]:
     """
     For each SimRoomClass, decode annotation crops → DINOv2 embeddings → mean prototype.
